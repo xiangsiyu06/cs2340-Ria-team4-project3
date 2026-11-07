@@ -1,0 +1,13 @@
+{% extends 'frontend/base.html' %}
+{% block title %}Sample source · DegreeGuide{% endblock %}
+{% block chat_current %}{% endblock %}
+{% block breadcrumb %}Sample document{% endblock %}
+{% block content %}
+<article class="sample-document card">
+  <span class="eyebrow">UI PREVIEW · PAGE 1</span>
+  <h1>DegreeGuide sample document</h1>
+  <p>This is a local fixture for testing source display, not an academic document.</p>
+  <blockquote>Source cards help you check an answer against its original document.</blockquote>
+  <a class="button button-primary" href="{% url 'preview' %}">Return to preview</a>
+</article>
+{% endblock %}
