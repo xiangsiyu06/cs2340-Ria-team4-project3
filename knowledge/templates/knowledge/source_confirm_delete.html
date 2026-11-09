@@ -1,0 +1,18 @@
+{% extends "knowledge/layout.html" %}
+
+{% block title %}Delete data source{% endblock %}
+
+{% block content %}
+<h1>Delete data source?</h1>
+<p>
+  This permanently deletes <strong>{{ source.name }}</strong>
+  ({{ source.get_source_type_display }}, {{ source.major }}, {{ source.catalog_year }}){% if source.file %} and its uploaded PDF{% endif %}.
+</p>
+<form method="post">
+  {% csrf_token %}
+  <div class="actions">
+    <button type="submit" class="danger">Yes, delete</button>
+    <a href="{% url 'knowledge:source_list' %}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

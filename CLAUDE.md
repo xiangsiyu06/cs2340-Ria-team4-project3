@@ -73,6 +73,76 @@ Other top-level paths:
 - **LLM, embedding model, and vector store (Yongyi + Yuhang):** still open, and they depend on the PythonAnywhere whitelist check (Yinuo).
 - **UI design system and base template (Bingchang):** colors, fonts, base template, components. Other pages should extend the base template instead of defining their own layout.
 
+## Data model & ingestion contract (US5)
+
+Owner: Siyu (US5). Code: `knowledge/models.py` (`DataSource`) and `knowledge/services.py` (`ingest_source`).
+
+**Every story that needs data sources must use `knowledge.models.DataSource`. Do not create another data source model.** To change its fields, agree with Siyu and Yongyi first.
+
+### `DataSource` fields
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `name` | `CharField(200)` | Required. |
+| `source_type` | `CharField`, choices `DataSource.SourceType` | `catalog_url` or `pdf`. |
+| `url` | `URLField(500)`, blank | Required for `catalog_url`; must be empty for `pdf`. |
+| `file` | `FileField(upload_to='sources/')`, blank | `.pdf` only. Required for `pdf`; must be empty for `catalog_url`. Stored under `MEDIA_ROOT/sources/`. |
+| `major` | `CharField(100)` | Required. |
+| `catalog_year` | `CharField(20)` | Required, e.g. `2026-2027`. |
+| `is_active` | `BooleanField`, default `True` | Inactive sources stay in the list but must not be used to answer questions. |
+| `status` | `CharField`, choices `DataSource.Status`, default `pending` | `pending` / `ingesting` / `ready` / `failed`. Set by ingestion, never by the form. |
+| `last_ingested_at` | `DateTimeField`, null | Time of the last successful ingestion. |
+| `last_error` | `TextField`, blank | Message from the last failed ingestion. |
+| `created_at`, `updated_at` | auto timestamps | |
+
+The URL/file rules live in `DataSource.clean()`, so they apply to the US5 form, the Django admin, and any `full_clean()` call. The upload form also rejects files that don't start with the `%PDF-` header.
+
+### Status lifecycle
+
+`pending` → `ingesting` → `ready` or `failed`
+
+- New sources start as `pending`.
+- Editing `source_type`, `url`, or `file` resets the status to `pending`, because the earlier import is out of date. Editing only `name`, `major`, `catalog_year`, or `is_active` keeps the status.
+- Change status through the model helpers, not by setting fields by hand. Each helper saves immediately:
+  - `source.mark_ingesting()`
+  - `source.mark_ready()`: sets `status='ready'`, `last_ingested_at=now`, `last_error=''`
+  - `source.mark_failed(message)`: sets `status='failed'`, `last_error=message`
+
+### `ingest_source(source: DataSource) -> None`
+
+Defined in `knowledge/services.py`. US5 owns the signature; US6/US7 (Yongyi) own the implementation. Until then it is a placeholder that marks the source `ingesting` and raises `NotImplementedError`.
+
+The implementation should:
+1. Call `source.mark_ingesting()`.
+2. Load the content: scrape `source.url` for `catalog_url`, or read `source.file` for `pdf`.
+3. Clean and preprocess it (US7), and replace any data previously imported for this source.
+4. On success, call `source.mark_ready()`.
+5. On failure, call `source.mark_failed(message)`. Re-raising afterwards is fine.
+6. Never leave a source in `ingesting`.
+
+The re-ingest view (`POST /knowledge/sources/<pk>/reingest/`) calls `ingest_source`. It catches any exception, records it with `mark_failed`, and shows the outcome to the user as a message.
+
+### Data built from a source
+
+- Anything derived from a source (documents, chunks, embeddings) should have `ForeignKey(DataSource, on_delete=models.CASCADE)`, so deleting a source also deletes its data. Data kept outside the database, such as a vector store, needs its own cleanup when a source is deleted.
+- Answers (US3) must only use data from sources with `is_active=True`.
+
+### US5 pages
+
+Staff only (`staff_member_required`); users log in at `/admin/login/`. URL names are in the `knowledge` namespace.
+
+| URL | Name | Notes |
+|-----|------|-------|
+| `/knowledge/sources/` | `knowledge:source_list` | List with status, last ingestion, and actions. |
+| `/knowledge/sources/new/` | `knowledge:source_create` | Create; supports PDF upload. |
+| `/knowledge/sources/<pk>/edit/` | `knowledge:source_edit` | Replacing or clearing the PDF deletes the old file. |
+| `/knowledge/sources/<pk>/delete/` | `knowledge:source_delete` | GET shows a confirmation page; POST deletes the row and its uploaded PDF. |
+| `/knowledge/sources/<pk>/reingest/` | `knowledge:source_reingest` | POST only. |
+
+Templates in `knowledge/templates/knowledge/` extend `knowledge/layout.html`. That is a temporary standalone layout; switch to `base.html` once it exists.
+
+Uploads are stored in `MEDIA_ROOT` (`BASE_DIR/media`, git-ignored). Django serves `/media/` only when `DEBUG=True`, so production needs its own `/media/` mapping, which is part of deployment (Yinuo).
+
 ## Rules for working in this repo
 
 1. **Know whose work this is.** Find out which teammate you are working for (ask, or check `git config user.name`). Implement only that person's stories. If a task belongs to another teammate's story, say so and stop. Don't build it, even partly.
