@@ -1,8 +1,10 @@
 import os
+from urllib.parse import quote
 
 from django.core.exceptions import ValidationError
 from django.core.validators import FileExtensionValidator
 from django.db import models
+from django.urls import reverse
 from django.utils import timezone
 
 
@@ -97,3 +99,26 @@ class DataSource(models.Model):
         self.status = self.Status.FAILED
         self.last_error = str(error)
         self.save(update_fields=['status', 'last_error', 'updated_at'])
+
+
+class Chunk(models.Model):
+    source = models.ForeignKey(DataSource, on_delete=models.CASCADE, related_name="chunks")
+    position = models.PositiveIntegerField()
+    text = models.TextField()
+    section = models.CharField(max_length=255, blank=True)
+    page_number = models.PositiveIntegerField(null=True, blank=True)
+    anchor = models.CharField(max_length=255, blank=True)
+    vector = models.JSONField(default=dict, editable=False)
+
+    class Meta:
+        ordering = ["source_id", "position"]
+        constraints = [
+            models.UniqueConstraint(fields=["source", "position"], name="knowledge_chunk_position")
+        ]
+
+    @property
+    def citation_url(self):
+        if self.source.source_type == DataSource.SourceType.PDF:
+            url = reverse("knowledge:source-pdf", args=[self.source_id])
+            return f"{url}#page={self.page_number}"
+        return self.source.url + (f"#{quote(self.anchor)}" if self.anchor else "")

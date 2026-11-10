@@ -2,16 +2,20 @@ import os
 import re
 import shutil
 import tempfile
+from io import BytesIO
 from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import IntegrityError
 from django.test import TestCase
 from django.urls import reverse
+from pypdf import PdfWriter
+from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
-from .models import DataSource
-from .services import ingest_source
+from .models import Chunk, DataSource
+from .services import ingest_source, published_chunks
 
 User = get_user_model()
 
@@ -193,12 +197,16 @@ class DataSourceModelTests(KnowledgeTestCase):
 
 
 class IngestSourceServiceTests(KnowledgeTestCase):
-    def test_placeholder_marks_ingesting_then_raises(self):
+    @mock.patch('knowledge.services.fetch_html', return_value='<main><p>CS 1301 | 3 credits</p></main>')
+    def test_catalog_ingestion_marks_ready_and_replaces_chunks(self, fetch):
         source = self.create_catalog_source()
-        with self.assertRaises(NotImplementedError):
-            ingest_source(source)
+        ingest_source(source)
         source.refresh_from_db()
-        self.assertEqual(source.status, DataSource.Status.INGESTING)
+        self.assertEqual(source.status, DataSource.Status.READY)
+        self.assertEqual(source.chunks.get().text, 'CS 1301 | 3 credits')
+        fetch.return_value = '<main><p>Updated CS 1301</p></main>'
+        ingest_source(source)
+        self.assertEqual(source.chunks.get().text, 'Updated CS 1301')
 
 
 class AccessControlTests(KnowledgeTestCase):
@@ -310,16 +318,16 @@ class StaffWorkflowTests(KnowledgeTestCase):
         self.assertEqual(catalog.major, 'Computer Science (Threads)')
         self.assertIn('<td>Computer Science (Threads)</td>', self.row_html(response, catalog))
 
-        # 5. Re-ingest the PDF. Ingestion isn't implemented yet, so it fails and says so.
+        # 5. A header-only fixture passes upload validation but fails text extraction.
         response = self.client.post(reingest_url(pdf), follow=True)
         self.assertRedirects(response, LIST_URL)
         pdf.refresh_from_db()
         self.assertEqual(pdf.status, DataSource.Status.FAILED)
-        self.assertIn('NotImplementedError', pdf.last_error)
+        self.assertTrue(pdf.last_error)
         self.assertContains(response, 'Re-ingest failed for')
         pdf_row = self.row_html(response, pdf)
         self.assertIn('<span class="status status-failed">Failed</span>', pdf_row)
-        self.assertIn('NotImplementedError', pdf_row)
+        self.assertIn(pdf.last_error, pdf_row)
 
         # 6. Delete the catalog source: GET only shows a confirmation page...
         response = self.client.get(delete_url(catalog))
@@ -481,11 +489,12 @@ class ReingestTests(KnowledgeTestCase):
         self.assertIsNotNone(self.source.last_ingested_at)
         self.assertIn('Re-ingested "Catalog page". Status: Ready.', self.messages_of(response))
 
-    def test_not_implemented_marks_failed(self):
+    @mock.patch('knowledge.services.fetch_html', return_value='<main></main>')
+    def test_empty_catalog_marks_failed(self, fetch):
         response = self.client.post(reingest_url(self.source), follow=True)
         self.source.refresh_from_db()
         self.assertEqual(self.source.status, DataSource.Status.FAILED)
-        self.assertEqual(self.source.last_error, 'NotImplementedError: Ingestion is not implemented yet (US6/US7).')
+        self.assertIn('no readable text', self.source.last_error)
         self.assertContains(response, 'Re-ingest failed for')
 
     def test_unexpected_error_marks_failed(self):
@@ -503,3 +512,105 @@ class ReingestTests(KnowledgeTestCase):
         self.source.refresh_from_db()
         self.assertEqual(self.source.status, DataSource.Status.FAILED)
         self.assertContains(response, 'PDF has no text')
+
+
+def sample_pdf():
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=300, height=300)
+    font = DictionaryObject({
+        NameObject("/Type"): NameObject("/Font"),
+        NameObject("/Subtype"): NameObject("/Type1"),
+        NameObject("/BaseFont"): NameObject("/Helvetica"),
+    })
+    page[NameObject("/Resources")] = DictionaryObject({
+        NameObject("/Font"): DictionaryObject({NameObject("/F1"): font}),
+    })
+    stream = DecodedStreamObject()
+    stream.set_data(b"BT /F1 12 Tf 20 280 Td (CS 1331 AND CS 1301) Tj ET")
+    page[NameObject("/Contents")] = writer._add_object(stream)
+    output = BytesIO()
+    writer.write(output)
+    return output.getvalue()
+
+
+
+class IntegratedImportTests(KnowledgeTestCase):
+    def test_pdf_upload_then_reingest_then_open_citation(self):
+        self.client.force_login(self.staff)
+        pdf = sample_pdf()
+        response = self.client.post(NEW_URL, self.pdf_data(file=make_pdf(content=pdf)))
+        self.assertRedirects(response, LIST_URL)
+        source = DataSource.objects.get()
+        self.assertContains(self.client.post(reingest_url(source), follow=True), 'Status: Ready.')
+        chunk = source.chunks.get()
+        self.assertEqual(chunk.page_number, 1)
+        self.assertIn('CS 1331 AND CS 1301', chunk.text)
+        self.client.logout()
+        response = self.client.get(chunk.citation_url.split('#')[0])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(b''.join(response.streaming_content), pdf)
+
+    @mock.patch('knowledge.services.fetch_html', return_value='<main><p>CS 1301</p></main>')
+    def test_failed_write_preserves_previous_chunks_and_records_failure(self, fetch):
+        source = self.create_catalog_source()
+        ingest_source(source)
+        original = source.chunks.get()
+        timestamp = source.last_ingested_at
+        with mock.patch.object(Chunk.objects, 'bulk_create', side_effect=IntegrityError):
+            with self.assertLogs('knowledge.services', level='ERROR'):
+                ingest_source(source)
+        source.refresh_from_db()
+        self.assertEqual(source.status, DataSource.Status.FAILED)
+        self.assertEqual(source.last_ingested_at, timestamp)
+        self.assertEqual(source.chunks.get(), original)
+        self.assertFalse(published_chunks().exists())
+        ingest_source(source)
+        self.assertEqual(published_chunks().count(), 1)
+        source.is_active = False
+        source.save(update_fields=['is_active'])
+        self.assertFalse(published_chunks().exists())
+        source.delete()
+        self.assertFalse(Chunk.objects.exists())
+
+
+    def test_disallowed_catalog_host_is_never_fetched(self):
+        source = self.create_catalog_source(url='https://example.com/')
+        with mock.patch('knowledge.services.fetch_html') as fetch:
+            ingest_source(source)
+        fetch.assert_not_called()
+        source.refresh_from_db()
+        self.assertEqual(source.status, DataSource.Status.FAILED)
+        self.assertIn('catalog.gatech.edu', source.last_error)
+
+    def test_edit_during_fetch_cannot_publish_stale_content(self):
+        source = self.create_catalog_source()
+
+        def edit_while_fetching(url):
+            edited = DataSource.objects.get(pk=source.pk)
+            self.assertEqual(edited.status, DataSource.Status.INGESTING)
+            edited.url = 'https://catalog.gatech.edu/programs/mathematics-bs/'
+            edited.status = DataSource.Status.PENDING
+            edited.save()
+            return '<main><p>Obsolete course text</p></main>'
+
+        with mock.patch('knowledge.services.fetch_html', side_effect=edit_while_fetching):
+            ingest_source(source)
+        source.refresh_from_db()
+        self.assertEqual(source.status, DataSource.Status.PENDING)
+        self.assertFalse(source.chunks.exists())
+
+    def test_metadata_edit_during_fetch_does_not_leave_source_ingesting(self):
+        source = self.create_catalog_source()
+
+        def rename_while_fetching(url):
+            edited = DataSource.objects.get(pk=source.pk)
+            edited.name = 'Renamed catalog'
+            edited.save()
+            return '<main><p>CS 1301</p></main>'
+
+        with mock.patch('knowledge.services.fetch_html', side_effect=rename_while_fetching):
+            ingest_source(source)
+        source.refresh_from_db()
+        self.assertEqual(source.status, DataSource.Status.READY)
+        self.assertEqual(source.name, 'Renamed catalog')
+        self.assertEqual(source.chunks.get().text, 'CS 1301')

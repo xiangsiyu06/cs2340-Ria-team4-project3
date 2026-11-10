@@ -1,6 +1,6 @@
 from unittest import TestCase
 
-from knowledge.services.preprocessing import Section, prepare_chunks, split_pdf_columns
+from knowledge.preprocessing import Section, prepare_chunks, split_pdf_columns
 
 
 class PreprocessingTests(TestCase):

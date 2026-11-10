@@ -2,8 +2,9 @@ import logging
 
 from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
+from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_POST, require_safe
 
 from .forms import DataSourceForm
 from .models import DataSource
@@ -88,6 +89,28 @@ def source_reingest(request, pk):
         source.refresh_from_db()
         if source.status == DataSource.Status.FAILED:
             messages.error(request, f'Re-ingest failed for "{source.name}": {source.last_error}')
-        else:
+        elif source.status == DataSource.Status.READY:
             messages.success(request, f'Re-ingested "{source.name}". Status: {source.get_status_display()}.')
+        else:
+            messages.info(request, f'Current status for "{source.name}": {source.get_status_display()}.')
     return redirect('knowledge:source_list')
+
+
+@require_safe
+def source_pdf(request, pk):
+    source = get_object_or_404(
+        DataSource, pk=pk, source_type=DataSource.SourceType.PDF,
+        status=DataSource.Status.READY, is_active=True,
+    )
+    if not source.file:
+        raise Http404
+    try:
+        uploaded = source.file.open("rb")
+    except OSError as exc:
+        raise Http404 from exc
+    response = FileResponse(
+        uploaded, filename=source.file_basename, content_type="application/pdf", as_attachment=True,
+    )
+    response.headers["Content-Security-Policy"] = "sandbox"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
