@@ -30,6 +30,30 @@ python manage.py runserver
 
 The server runs at http://127.0.0.1:8000/. Until the first views are merged, `/admin/` is the only working route.
 
+### Bingchang's Sprint 1 frontend preview
+
+The reusable `frontend/` app contains the US2 chat interface, US4 source cards,
+and shared UI styles. It is not yet mounted in the shared project or connected
+to Yuhang's RAG API. `manage.py` continues to use the team's `config.settings`.
+To review the frontend independently, run:
+
+```bash
+python manage.py runserver --settings=devpreview.settings
+```
+
+Open http://127.0.0.1:8000/preview/ for clearly labeled sample responses. This
+preview uses no database or API keys. Its `/` route targets the proposed live
+API and reports unavailable until integration; sample routes are local fixtures.
+
+```bash
+python manage.py test frontend --settings=devpreview.settings
+```
+
+Optional browser checks: Node 20+, Google Chrome, `npm ci`, then `npm test`.
+Playwright starts the preview server using `.venv/bin/python`.
+See [the handoff](docs/sprint-1-handoff.md), [API contract](docs/chat-api.md),
+and [UI guide](docs/ui-system.md) for integration and hosted acceptance work.
+
 `.env` holds your local settings and is git-ignored. The placeholder `SECRET_KEY=change-me` works for local development. To use a real random key instead, run:
 
 ```bash

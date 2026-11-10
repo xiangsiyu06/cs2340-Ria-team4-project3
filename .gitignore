@@ -207,6 +207,13 @@ cython_debug/
 # Temporary file for partial code execution
 tempCodeRunnerFile.py
 
+# Frontend browser checks and local graph tooling
+node_modules/
+playwright-report/
+test-results/
+graphify-out/
+.graphify_cache/
+
 # Ruff stuff:
 .ruff_cache/
 

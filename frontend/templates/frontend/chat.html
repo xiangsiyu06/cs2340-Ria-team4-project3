@@ -1,0 +1,40 @@
+{% extends 'frontend/base.html' %}
+{% load static %}
+{% block content %}
+<div class="chat-page" data-chat-app data-api-url="{{ chat_api_url }}">
+  {% if is_preview %}<div class="preview-banner" role="note"><strong>UI preview</strong> Fixed sample answers and sources. No live academic information. <a href="{% url 'frontend:chat' %}">Leave preview ↗</a></div>{% endif %}
+  <div class="chat-toolbar"><span class="section-label">YOUR ACADEMIC COMPANION</span><button id="new-chat" class="button button-subtle" type="button" disabled><span aria-hidden="true">＋</span> New conversation</button></div>
+  <section id="welcome" class="welcome" aria-labelledby="welcome-title">
+    <div class="welcome-symbol" aria-hidden="true"><svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="25"/><path d="m41 23-5 13-13 5 5-13 13-5Z"/><circle cx="32" cy="32" r="2"/><path d="M32 3v7m0 44v7M3 32h7m44 0h7"/></svg></div>
+    <span class="eyebrow">LESS GUESSWORK. MORE POSSIBILITY.</span>
+    <h1 id="welcome-title">A clearer path to<br><em>your degree.</em></h1>
+    <p class="welcome-description">Questions about requirements, courses, or what comes next?<br class="desktop-break"> Start here. Let's make your next step a little clearer.</p>
+    <div class="suggestions" aria-label="Suggested questions">
+      <button class="suggestion" type="button" data-question="What are the degree requirements for the BS in Computer Science?">
+        <span class="suggestion-icon" aria-hidden="true">▤</span><strong>Know your requirements</strong><span>What do I need for a CS degree?</span><span class="suggestion-arrow" aria-hidden="true">↗</span>
+      </button>
+      <button class="suggestion" type="button" data-question="How do threads work in the Computer Science degree?">
+        <span class="suggestion-icon" aria-hidden="true">⌘</span><strong>Explore your options</strong><span>How do CS threads work?</span><span class="suggestion-arrow" aria-hidden="true">↗</span>
+      </button>
+      <button class="suggestion" type="button" data-question="Where can I find the prerequisites for a course?">
+        <span class="suggestion-icon" aria-hidden="true">↳</span><strong>Plan your next step</strong><span>Where do I find prerequisites?</span><span class="suggestion-arrow" aria-hidden="true">↗</span>
+      </button>
+    </div>
+    <div class="source-promise"><span aria-hidden="true">⊙</span> Answers with sources, so you can see the bigger picture.</div>
+  </section>
+  <section id="conversation" class="conversation" role="log" aria-label="Conversation" aria-live="polite" aria-relevant="additions text" hidden></section>
+  <div class="composer-area">
+    <div id="request-status" class="request-status" role="status"></div>
+    <form id="question-form" class="composer">
+      {% csrf_token %}
+      <label class="sr-only" for="question">Your question</label>
+      <textarea id="question" name="question" rows="2" maxlength="2000" required placeholder="Ask a question about your degree…" aria-describedby="composer-hint character-count"></textarea>
+      <div class="composer-bottom"><span id="composer-hint">Enter to send <span aria-hidden="true">·</span> Shift + Enter for a new line</span><div><span id="character-count">0 / 2,000</span><button id="send-question" class="send-button" type="submit" aria-label="Send question" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button></div></div>
+    </form>
+    <div id="request-error" class="error-message" role="alert" hidden><span id="error-text"></span> <button id="retry-question" type="button" class="text-button">Try again</button></div>
+    <p class="composer-footnote">A starting point for your planning. Always confirm with your catalog and academic advisor.</p>
+    <noscript><p class="error-message">Enable JavaScript to send questions and view answer sources.</p></noscript>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}<script type="module" src="{% static 'frontend/chat.js' %}"></script>{% endblock %}
