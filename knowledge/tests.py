@@ -119,7 +119,7 @@ class KnowledgeTestCase(TestCase):
     # --- assertions -------------------------------------------------------
 
     def assertRedirectsToLogin(self, response, url):
-        self.assertRedirects(response, f"{reverse('admin:login')}?next={url}")
+        self.assertRedirects(response, f"{reverse('knowledge:login')}?next={url}")
 
     def row_html(self, response, source):
         """Return the HTML of one source's row on the list page."""
@@ -614,3 +614,27 @@ class IntegratedImportTests(KnowledgeTestCase):
         self.assertEqual(source.status, DataSource.Status.READY)
         self.assertEqual(source.name, 'Renamed catalog')
         self.assertEqual(source.chunks.get().text, 'CS 1301')
+
+
+class StaffLoginTests(KnowledgeTestCase):
+    def test_staff_can_sign_in_and_return_to_sources(self):
+        login = reverse('knowledge:login')
+        self.assertContains(self.client.get(login), 'Staff sign in')
+        response = self.client.post(login, {
+            'username': self.staff.username, 'password': self.password, 'next': LIST_URL,
+        })
+        self.assertRedirects(response, LIST_URL)
+
+    def test_nonstaff_cannot_sign_in(self):
+        response = self.client.post(reverse('knowledge:login'), {
+            'username': self.regular.username, 'password': self.password,
+        })
+        self.assertContains(response, 'errorlist')
+        self.assertNotIn('_auth_user_id', self.client.session)
+
+    def test_external_next_is_ignored(self):
+        response = self.client.post(reverse('knowledge:login'), {
+            'username': self.staff.username, 'password': self.password,
+            'next': 'https://example.com/',
+        })
+        self.assertRedirects(response, LIST_URL)

@@ -1,4 +1,5 @@
 import logging
+from functools import partial
 
 from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
@@ -11,18 +12,19 @@ from .models import DataSource
 from .services import ingest_source
 
 logger = logging.getLogger(__name__)
+staff_only = partial(staff_member_required, login_url="knowledge:login")
 
 # Editing any of these changes what gets ingested, so the old import is out of date.
 CONTENT_FIELDS = {'source_type', 'url', 'file'}
 
 
-@staff_member_required
+@staff_only
 def source_list(request):
     sources = DataSource.objects.all()
     return render(request, 'knowledge/source_list.html', {'sources': sources})
 
 
-@staff_member_required
+@staff_only
 def source_create(request):
     if request.method == 'POST':
         form = DataSourceForm(request.POST, request.FILES)
@@ -35,7 +37,7 @@ def source_create(request):
     return render(request, 'knowledge/source_form.html', {'form': form, 'is_new': True})
 
 
-@staff_member_required
+@staff_only
 def source_edit(request, pk):
     source = get_object_or_404(DataSource, pk=pk)
     old_file_name = source.file.name
@@ -56,7 +58,7 @@ def source_edit(request, pk):
     return render(request, 'knowledge/source_form.html', {'form': form, 'is_new': False})
 
 
-@staff_member_required
+@staff_only
 def source_delete(request, pk):
     source = get_object_or_404(DataSource, pk=pk)
     if request.method == 'POST':
@@ -71,7 +73,7 @@ def source_delete(request, pk):
     return render(request, 'knowledge/source_confirm_delete.html', {'source': source})
 
 
-@staff_member_required
+@staff_only
 @require_POST
 def source_reingest(request, pk):
     source = get_object_or_404(DataSource, pk=pk)

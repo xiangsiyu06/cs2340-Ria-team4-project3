@@ -1,10 +1,21 @@
-from django.urls import path
+from django.contrib.admin.forms import AdminAuthenticationForm
+from django.contrib.auth.views import LoginView
+from django.urls import path, reverse_lazy
 
 from . import views
 
 app_name = 'knowledge'
 
 urlpatterns = [
+    path(
+        'login/',
+        LoginView.as_view(
+            template_name='knowledge/login.html',
+            authentication_form=AdminAuthenticationForm,
+            next_page=reverse_lazy('knowledge:source_list'),
+        ),
+        name='login',
+    ),
     # US5: data source management (staff only)
     path('sources/', views.source_list, name='source_list'),
     path('sources/new/', views.source_create, name='source_create'),
