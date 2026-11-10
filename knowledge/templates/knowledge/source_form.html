@@ -1,0 +1,16 @@
+{% extends "knowledge/layout.html" %}
+
+{% block title %}{% if is_new %}Add data source{% else %}Edit data source{% endif %}{% endblock %}
+
+{% block content %}
+<h1>{% if is_new %}Add data source{% else %}Edit data source{% endif %}</h1>
+
+<form method="post" enctype="multipart/form-data" class="stacked">
+  {% csrf_token %}
+  {{ form }}
+  <div class="actions">
+    <button type="submit">Save</button>
+    <a href="{% url 'knowledge:source_list' %}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

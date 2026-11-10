@@ -1,0 +1,16 @@
+{% extends "knowledge/layout.html" %}
+
+{% block title %}Staff sign in{% endblock %}
+
+{% block content %}
+<section aria-labelledby="staff-sign-in" style="max-width: 28rem; margin: 2rem auto; padding: 1.5rem; background: #fff; border: 1px solid #e3e6ea; border-radius: 6px;">
+  <h1 id="staff-sign-in">Staff sign in</h1>
+  <p>Use your DegreeGuide staff account to manage catalog and PDF sources.</p>
+  <form class="stacked" method="post">
+    {% csrf_token %}
+    {{ form.as_div }}
+    <input type="hidden" name="next" value="{{ next }}">
+    <button type="submit">Sign in</button>
+  </form>
+</section>
+{% endblock %}

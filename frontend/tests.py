@@ -3,7 +3,14 @@ import json
 from django.test import Client, SimpleTestCase, override_settings
 from django.urls import resolve, reverse
 
+from devpreview import settings as preview_settings
 
+
+@override_settings(
+    ROOT_URLCONF="devpreview.urls",
+    INSTALLED_APPS=preview_settings.INSTALLED_APPS,
+    MIDDLEWARE=preview_settings.MIDDLEWARE,
+)
 class FrontendTests(SimpleTestCase):
     def test_home_renders_live_endpoint_and_csrf_token(self):
         response = self.client.get(reverse("frontend:chat"))

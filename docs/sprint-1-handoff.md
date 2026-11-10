@@ -30,8 +30,8 @@ complete until live integration and hosted acceptance pass.
 
 ```sh
 source .venv/bin/activate
-python manage.py check
-python manage.py test
+python manage.py check --settings=devpreview.settings
+python manage.py test frontend --settings=devpreview.settings
 npm ci
 npm test
 ```
