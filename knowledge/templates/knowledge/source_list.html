@@ -1,0 +1,62 @@
+{% extends "knowledge/layout.html" %}
+
+{% block title %}Data sources{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <h1>Data sources</h1>
+  <a class="button" href="{% url 'knowledge:source_create' %}">Add data source</a>
+</div>
+
+{% if sources %}
+<table>
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Type</th>
+      <th>Major</th>
+      <th>Catalog year</th>
+      <th>Active</th>
+      <th>Status</th>
+      <th>Last ingested (UTC)</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for source in sources %}
+    <tr id="source-{{ source.pk }}">
+      <td>
+        {{ source.name }}<br>
+        {% if source.url %}
+          <small><a href="{{ source.url }}" target="_blank" rel="noopener">{{ source.url|truncatechars:60 }}</a></small>
+        {% elif source.file %}
+          <small><a href="{{ source.file.url }}" target="_blank" rel="noopener">{{ source.file_basename }}</a></small>
+        {% endif %}
+      </td>
+      <td>{{ source.get_source_type_display }}</td>
+      <td>{{ source.major }}</td>
+      <td>{{ source.catalog_year }}</td>
+      <td>{{ source.is_active|yesno:"Yes,No" }}</td>
+      <td>
+        <span class="status status-{{ source.status }}">{{ source.get_status_display }}</span>
+        {% if source.status == "failed" and source.last_error %}<br><small>{{ source.last_error|truncatechars:120 }}</small>{% endif %}
+      </td>
+      <td>{{ source.last_ingested_at|date:"Y-m-d H:i"|default:"Never" }}</td>
+      <td>
+        <div class="actions">
+          <a href="{% url 'knowledge:source_edit' source.pk %}">Edit</a>
+          <a href="{% url 'knowledge:source_delete' source.pk %}">Delete</a>
+          <form method="post" action="{% url 'knowledge:source_reingest' source.pk %}">
+            {% csrf_token %}
+            <button type="submit" class="secondary">Re-ingest</button>
+          </form>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No data sources yet. <a href="{% url 'knowledge:source_create' %}">Add the first one.</a></p>
+{% endif %}
+{% endblock %}
