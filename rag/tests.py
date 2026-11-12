@@ -95,6 +95,9 @@ class RetrievalTests(KnowledgeBaseMixin, TestCase):
         chunks = with_neighbors(hits)
         self.assertEqual(chunks[:2], [heading, table])
         self.assertEqual(len(chunks), len({c.id for c in chunks}))
+        prompt = build_messages("q", chunks)[1]["content"]
+        self.assertIn("[2] BS Mathematics (Mathematics, 2026-2027) - section: Option - continues directly from [1]", prompt)
+        self.assertNotIn("[1] BS Mathematics (Mathematics, 2026-2027) - section: Option - continues", prompt)
 
     def test_comparison_retrieves_each_side(self):
         question = "What is the difference between the Threads and the GPA?"

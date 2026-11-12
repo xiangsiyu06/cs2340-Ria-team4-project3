@@ -169,20 +169,29 @@ def system_prompt(intent):
     return f"{GROUNDING_RULES}\n\nThis question is a {intent.label.lower()}. {intent.instructions}"
 
 
-def context_block(number, chunk):
-    """Format one retrieved chunk as a numbered source."""
+def context_block(number, chunk, previous=None):
+    """Format one retrieved chunk as a numbered source.
+
+    When the chunk directly follows the previous source in the same document
+    (a heading-only chunk and the table under it), say so, so the model reads
+    them as one passage.
+    """
     source = chunk.source
     label = f"[{number}] {source.name} ({source.major}, {source.catalog_year})"
     if chunk.section:
         label += f" - section: {chunk.section}"
     if chunk.page_number:
         label += f" - page {chunk.page_number}"
+    if previous is not None and previous.source_id == chunk.source_id and previous.position + 1 == chunk.position:
+        label += f" - continues directly from [{number - 1}]"
     return f"{label}\n{chunk.text}"
 
 
 def build_messages(question, chunks, intent=DEFAULT_INTENT):
     """Return OpenAI-style chat messages for a grounded answer of this intent."""
-    context = "\n\n".join(context_block(i, chunk) for i, chunk in enumerate(chunks, 1))
+    context = "\n\n".join(
+        context_block(i, chunk, chunks[i - 2] if i > 1 else None) for i, chunk in enumerate(chunks, 1)
+    )
     user = (
         f"Sources:\n\n{context}\n\n"
         f"Question: {question}\n\n"
