@@ -57,7 +57,10 @@ sent as model history. Students should include necessary context in each questio
 ```
 
 - `answer`: required nonempty plain text. HTML and Markdown are displayed literally.
-- `question_type`: optional string from runtime prompt selection (US8).
+- `question_type`: the intent chosen at runtime by `rag/prompts.py` (US8). One of
+  `Factual lookup`, `Explanation`, `Comparison`, `Planning`, `General`. Staff can
+  see why a question was classified and the exact prompt built for it at
+  `GET /rag/prompt-preview/?q=...`.
 - `sources`: required array; `[]` is allowed for an explicit no-result answer.
   Return the documents actually used for this answer. The UI never invents sources.
 - Each source requires a nonempty `title`. `url`, `page`, and `excerpt` may be
