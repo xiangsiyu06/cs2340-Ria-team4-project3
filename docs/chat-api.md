@@ -1,7 +1,9 @@
-# Proposed chat API · Sprint 1
+# Chat API · Sprint 1
 
 Owner: Yuhang Jiang (US3/US8). Consumer: Bingchang Wu (US2/US4).
-This is a proposed contract, pending teammate agreement.
+Implemented by the `rag` app at **`POST /rag/ask/`** (`rag/views.py`,
+`rag/services.py`). The contract below is the one the frontend was built
+against; the backend follows it as written.
 
 ## Mount the frontend in the shared Django project
 
@@ -13,9 +15,16 @@ This is a proposed contract, pending teammate agreement.
 5. Register the real API separately. Do not include `devpreview.urls` or deploy
    `devpreview.settings`. Configure and collect static files in the hosting project.
 
-The default endpoint is `/api/chat/`. Override `DEGREEGUIDE_CHAT_API_URL` in the
-host settings if needed. It must be on the same origin as the frontend. No browser
-LLM keys or cross-origin proxy configuration is needed.
+The frontend's default endpoint is `/api/chat/`; the live endpoint is `/rag/ask/`,
+so the host settings need one line (shared file, so post on Teams first):
+
+```python
+DEGREEGUIDE_CHAT_API_URL = "/rag/ask/"
+```
+
+It must be on the same origin as the frontend. No browser LLM keys or
+cross-origin proxy configuration is needed. The backend reads its model
+settings from `.env` (`LLM_API_URL`, `LLM_MODEL`, `LLM_API_KEY`); see `.env.example`.
 
 ## Request
 
@@ -48,7 +57,7 @@ sent as model history. Students should include necessary context in each questio
 ```
 
 - `answer`: required nonempty plain text. HTML and Markdown are displayed literally.
-- `question_type`: optional string from runtime prompt selection.
+- `question_type`: optional string from runtime prompt selection (US8).
 - `sources`: required array; `[]` is allowed for an explicit no-result answer.
   Return the documents actually used for this answer. The UI never invents sources.
 - Each source requires a nonempty `title`. `url`, `page`, and `excerpt` may be
@@ -59,11 +68,19 @@ sent as model history. Students should include necessary context in each questio
   the excerpt and an original-document link that opens in a new tab.
 - Missing or unsafe links show “Original document link unavailable.” An empty
   source list explicitly says that no sources were returned.
+- Answers cite sources inline as `[1]`, `[2]`, … in the same order as the
+  `sources` array. Catalog pages link to the page (plus `#anchor` when the
+  section has one); uploaded PDFs link to `/knowledge/sources/<pk>/pdf/#page=N`.
+- **No-result answer (US3):** when nothing relevant is in the knowledge base, or
+  the model reports that the retrieved text does not answer the question, the
+  backend returns a fixed explanatory `answer` with `"sources": []`. It never
+  answers from outside the dataset.
 
 ## Failure
 
-Use a non-2xx status: 400 invalid question, 403 CSRF/session, 429 rate limit,
-or 5xx unavailable. JSON `{ "error": "..." }` is useful for API consumers;
+Use a non-2xx status: 400 invalid question or JSON, 403 CSRF/session,
+405 not POST, 415 not `application/json`, 429 rate limit, or 503 when the
+model cannot be reached (the backend never substitutes a made-up answer). JSON `{ "error": "..." }` is useful for API consumers;
 the frontend uses its own status-based messages instead of exposing server details.
 Malformed JSON/schema and network failures also show a recoverable error.
 
