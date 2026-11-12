@@ -1,8 +1,9 @@
-"""US3: answer a question using only the published knowledge base.
+"""US3/US8: answer a question using only the published knowledge base.
 
-Pipeline: validate -> retrieve chunks -> build prompt -> model -> post-check.
-The model never sees a question without retrieved context, and the sources
-returned are exactly the chunks the answer cited.
+Pipeline: validate -> classify (US8) -> retrieve chunks -> build the prompt
+for that intent -> model -> post-check. The model never sees a question
+without retrieved context, and the sources returned are exactly the chunks
+the answer cited.
 """
 
 import logging
@@ -10,8 +11,8 @@ import re
 from dataclasses import dataclass, field
 
 from .llm import complete
-from .prompts import NOT_IN_SOURCES, build_messages
-from .retrieval import retrieve
+from .prompts import NOT_IN_SOURCES, build_messages, classify, comparison_sides
+from .retrieval import retrieve, with_neighbors
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +107,23 @@ def cited_chunks(text, chunks):
     return text, used
 
 
+def retrieve_for(question, intent):
+    """Retrieval strategy per intent (US8).
+
+    A comparison also searches for each named option on its own, so both sides
+    reach the model even when one is lexically rarer than the other.
+    """
+    hits = retrieve(question, limit=intent.retrieval_limit)
+    if intent.key == "comparison":
+        for side in comparison_sides(question):
+            hits.extend(retrieve(side, limit=2))
+    best = {}
+    for hit in hits:
+        if hit.chunk.id not in best or hit.score > best[hit.chunk.id].score:
+            best[hit.chunk.id] = hit
+    return sorted(best.values(), key=lambda hit: hit.score, reverse=True)[: intent.retrieval_limit]
+
+
 def answer(question) -> Answer:
     """Answer ``question`` from the knowledge base, or say that it cannot.
 
@@ -113,15 +131,16 @@ def answer(question) -> Answer:
     model cannot be reached; it never returns a made-up answer.
     """
     question = clean_question(question)
-    hits = retrieve(question)
+    intent = classify(question).intent
+    hits = retrieve_for(question, intent)
     if not hits:
-        logger.info("No relevant chunks for question: %r", question)
-        return no_result()
+        logger.info("No relevant chunks for %s question: %r", intent.key, question)
+        return no_result(intent.label)
 
-    chunks = [hit.chunk for hit in hits]
-    text = complete(build_messages(question, chunks))
+    chunks = with_neighbors(hits)
+    text = complete(build_messages(question, chunks, intent), temperature=intent.temperature)
     if NOT_IN_SOURCES in text:
-        return no_result()
+        return no_result(intent.label)
 
     text, used = cited_chunks(text, chunks)
-    return Answer(text=text, sources=[source_for(chunk) for chunk in used])
+    return Answer(text=text, sources=[source_for(chunk) for chunk in used], intent=intent.label)
