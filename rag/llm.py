@@ -4,7 +4,7 @@ Standard library only, so no provider SDK is added to requirements.txt. The
 provider is chosen entirely in ``.env``:
 
     LLM_API_URL   chat-completions URL (default: Gemini's OpenAI-compatible endpoint)
-    LLM_MODEL     model name (default: gemini-3.5-flash)
+    LLM_MODEL     model name (default: gemini-3.1-flash-lite; larger free quota than gemini-3.5-flash)
     LLM_API_KEY   bearer token
 """
 
@@ -18,7 +18,7 @@ from urllib.request import Request, urlopen
 logger = logging.getLogger(__name__)
 
 DEFAULT_API_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-DEFAULT_MODEL = "gemini-3.5-flash"
+DEFAULT_MODEL = "gemini-3.1-flash-lite"
 MAX_OUTPUT_TOKENS = 1024
 # The chat UI gives up after 60 s, so two attempts must finish well inside that.
 ATTEMPT_TIMEOUT_SECONDS = 22
