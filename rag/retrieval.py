@@ -15,6 +15,9 @@ from knowledge.models import Chunk
 from knowledge.services import published_chunks, term_vector
 
 TOP_K = 5
+# A chunk this short is usually a heading or lead-in ("The following classes
+# count toward..."); the content it introduces is in the next chunk.
+SHORT_CHUNK_CHARS = 200
 # Share of the question's weighted terms that a chunk must contain. Below this
 # the corpus has nothing relevant, so the answer service says so instead of
 # guessing. The model's own "not in sources" check is the second guard.
@@ -139,3 +142,30 @@ def retrieve(question, *, limit=TOP_K, floor=RELEVANCE_FLOOR):
 
     chunks = Chunk.objects.select_related("source").in_bulk([cid for _, cid in scored])
     return [Hit(chunks[cid], round(score, 4)) for score, cid in scored if cid in chunks]
+
+
+def with_neighbors(hits):
+    """Chunks for the model: each hit, plus the next chunk after a very short one.
+
+    Ingestion splits on headings, so a heading-only section can be retrieved
+    without the table or list that follows it. Order is preserved; duplicates
+    are dropped.
+    """
+    chunks = []
+    seen = set()
+    for hit in hits:
+        for chunk in (hit.chunk, next_chunk(hit.chunk)):
+            if chunk is not None and chunk.id not in seen:
+                seen.add(chunk.id)
+                chunks.append(chunk)
+    return chunks
+
+
+def next_chunk(chunk):
+    if len(chunk.text) >= SHORT_CHUNK_CHARS:
+        return None
+    return (
+        Chunk.objects.select_related("source")
+        .filter(source=chunk.source, position=chunk.position + 1)
+        .first()
+    )
