@@ -11,12 +11,16 @@ import re
 from dataclasses import dataclass, field
 
 from .llm import complete
+from .planner import SMALL_TALK_TEXT, plan
+
+THANKS_TEXT = "You're welcome! Ask me anything else about your degree requirements or courses."
 from .prompts import NOT_IN_SOURCES, build_messages, classify, comparison_sides
 from .retrieval import retrieve, with_neighbors
 
 logger = logging.getLogger(__name__)
 
 MAX_QUESTION_LENGTH = 2000
+GREETING = re.compile(r"^(hi|hello|hey|thanks|thank you|good (morning|afternoon|evening))\b[\s!.,]*\S{0,20}[\s!.]*$", re.I)
 EXCERPT_LENGTH = 300
 
 NO_RESULT_TEXT = (
@@ -115,13 +119,13 @@ def cited_chunks(text, chunks):
     return text, used
 
 
-def retrieve_for(question, intent):
+def retrieve_for(question, intent, search_text=None):
     """Retrieval strategy per intent (US8).
 
     A comparison also searches for each named option on its own, so both sides
     reach the model even when one is lexically rarer than the other.
     """
-    hits = retrieve(question, limit=intent.retrieval_limit)
+    hits = retrieve(search_text or question, limit=intent.retrieval_limit)
     if intent.key == "comparison":
         for side in comparison_sides(question):
             hits.extend(retrieve(side, limit=2))
@@ -132,15 +136,27 @@ def retrieve_for(question, intent):
     return sorted(best.values(), key=lambda hit: hit.score, reverse=True)[: intent.retrieval_limit]
 
 
-def answer(question) -> Answer:
+def answer(question, history=()) -> Answer:
     """Answer ``question`` from the knowledge base, or say that it cannot.
 
     Raises ``InvalidQuestion`` for bad input and ``LLMUnavailable`` when the
     model cannot be reached; it never returns a made-up answer.
     """
     question = clean_question(question)
+    if GREETING.match(question):
+        text = THANKS_TEXT if question.lower().startswith("thank") else SMALL_TALK_TEXT
+        return Answer(text, [], "Small talk")
+    if not history and not retrieve(question, floor=0.0, limit=1):
+        # Shares no words with the knowledge base and isn't a follow-up:
+        # refuse without spending a model call.
+        logger.info("No overlap with the knowledge base: %r", question)
+        return no_result(classify(question).intent.label)
+    planned = plan(question, history)
+    if planned.small_talk:
+        return Answer(SMALL_TALK_TEXT, [], "Small talk")
+    question = planned.question
     intent = classify(question).intent
-    hits = retrieve_for(question, intent)
+    hits = retrieve_for(question, intent, planned.search_text)
     if not hits:
         logger.info("No relevant chunks for %s question: %r", intent.key, question)
         return no_result(intent.label)
