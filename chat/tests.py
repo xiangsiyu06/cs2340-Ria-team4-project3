@@ -43,9 +43,11 @@ class ConnectedChatTests(TestCase):
     @patch.dict("os.environ", {"LLM_API_KEY": "integration-test-key"})
     @patch("rag.llm.urlopen")
     def test_ingested_document_reaches_provider_and_returns_cited_answer(self, provider):
-        provider.return_value.__enter__.return_value = BytesIO(json.dumps({
+        payload = json.dumps({
             "choices": [{"message": {"content": "CS 1332 is 3 credit hours [1]."}}],
-        }).encode())
+        }).encode()
+        # A fresh response per call: the retrieval planner calls the model before the answer does.
+        provider.return_value.__enter__.side_effect = lambda *args: BytesIO(payload)
         response = self.ask("How many credit hours is CS 1332?")
         self.assertEqual(response.status_code, 200)
         result = response.json()
@@ -59,7 +61,7 @@ class ConnectedChatTests(TestCase):
     @patch("rag.llm.urlopen")
     def test_unsupported_question_uses_real_no_result_flow(self, provider):
         result = self.ask("How do I bake sourdough bread?").json()
-        self.assertEqual(result["answer"], NO_RESULT_TEXT)
+        self.assertTrue(result["answer"].startswith(NO_RESULT_TEXT))
         self.assertEqual(result["sources"], [])
         provider.assert_not_called()
 

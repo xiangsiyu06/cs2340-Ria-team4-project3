@@ -41,7 +41,7 @@ def config():
     }
 
 
-def complete(messages, *, temperature=0.1):
+def complete(messages, *, temperature=0.1, attempts=2, timeout=ATTEMPT_TIMEOUT_SECONDS):
     """Send ``messages`` (OpenAI chat format) and return the assistant's text."""
     settings = config()
     if not settings["key"]:
@@ -68,9 +68,9 @@ def complete(messages, *, temperature=0.1):
     )
 
     last_error = None
-    for attempt in (1, 2):
+    for attempt in range(1, attempts + 1):
         try:
-            with urlopen(request, timeout=ATTEMPT_TIMEOUT_SECONDS) as response:
+            with urlopen(request, timeout=timeout) as response:
                 payload = json.load(response)
             return _text(payload)
         except HTTPError as exc:

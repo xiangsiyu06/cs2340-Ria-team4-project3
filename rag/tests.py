@@ -10,8 +10,8 @@ from knowledge.services import term_vector
 
 from .llm import LLMUnavailable
 from .prompts import INTENTS, NOT_IN_SOURCES, build_messages, classify, comparison_sides
-from .retrieval import retrieve, with_neighbors
-from .services import NO_RESULT_TEXT, InvalidQuestion, answer, retrieve_for
+from .retrieval import RELEVANCE_FLOOR, query_terms, retrieve, with_neighbors
+from .services import NO_RESULT_TEXT, InvalidQuestion, answer, cited_chunks, retrieve_for
 
 ASK_URL = reverse("rag:ask")
 PREVIEW_URL = reverse("rag:prompt_preview")
@@ -52,6 +52,10 @@ def make_chunk(source, position, text, section="", anchor=""):
 
 class KnowledgeBaseMixin:
     def setUp(self):
+        # The planner's model call is off by default, so it falls back to the original question.
+        planner = mock.patch("rag.planner.complete", side_effect=LLMUnavailable("off in tests"))
+        self.planner = planner.start()
+        self.addCleanup(planner.stop)
         self.cs = make_source("BS Computer Science", "Computer Science")
         self.threads = make_chunk(self.cs, 0, THREADS_TEXT, section="Threads", anchor="threads")
         self.course = make_chunk(self.cs, 1, COURSE_TEXT, section="Courses")
@@ -77,6 +81,17 @@ class RetrievalTests(KnowledgeBaseMixin, TestCase):
     def test_only_active_ready_sources_take_part(self):
         chunks = {hit.chunk for hit in retrieve("Threads threads", floor=0.0)}
         self.assertEqual(chunks, {self.threads})
+
+    def test_word_missing_from_knowledge_base_does_not_sink_question(self):
+        # No chunk says "BS" or "graduation", but the threads chunk is about the
+        # Bachelor of Science in Computer Science and must still be found.
+        hits = retrieve("What does the BS in computer science need for graduation?")
+        self.assertEqual(hits[0].chunk, self.threads)
+        self.assertGreater(hits[0].score, 2 * RELEVANCE_FLOOR)
+
+    def test_abbreviations_expand_and_keep_the_original(self):
+        terms = query_terms("prereqs for the BS and MS in math")
+        self.assertLessEqual({"prereq", "prerequisite", "bs", "bachelor", "ms", "master", "science", "math", "mathematic"}, terms)
 
     def test_unrelated_question_returns_nothing(self):
         self.assertEqual(retrieve("How do I bake sourdough bread?"), [])
@@ -173,25 +188,26 @@ class PromptTests(KnowledgeBaseMixin, TestCase):
         messages = build_messages("What is CS 1332?", [self.threads, self.course])
         self.assertEqual([m["role"] for m in messages], ["system", "user"])
         self.assertIn(NOT_IN_SOURCES, messages[0]["content"])
+        self.assertIn("Some sources may be unrelated to the question. Ignore those", messages[0]["content"])
         user = messages[1]["content"]
         self.assertIn("[1] BS Computer Science (Computer Science, 2026-2027) - section: Threads", user)
         self.assertIn("[2] BS Computer Science", user)
         self.assertIn(COURSE_TEXT, user)
-        self.assertTrue(user.rstrip().endswith(f"reply with exactly {NOT_IN_SOURCES}."))
+        self.assertTrue(user.rstrip().endswith(f"reply with {NOT_IN_SOURCES} and one sentence on what is missing."))
 
 
 @mock.patch("rag.services.complete")
 class AnswerServiceTests(KnowledgeBaseMixin, TestCase):
     def test_no_relevant_chunks_means_no_model_call(self, complete):
         result = answer("How do I bake sourdough bread?")
-        self.assertEqual(result.text, NO_RESULT_TEXT)
+        self.assertTrue(result.text.startswith(NO_RESULT_TEXT))
         self.assertEqual(result.sources, [])
         complete.assert_not_called()
 
     def test_model_can_decline_when_sources_do_not_answer(self, complete):
         complete.return_value = NOT_IN_SOURCES
         result = answer("What is the CS 1332 grading policy?")
-        self.assertEqual(result.text, NO_RESULT_TEXT)
+        self.assertTrue(result.text.startswith(NO_RESULT_TEXT))
         self.assertEqual(result.sources, [])
 
     def test_sources_are_the_cited_chunks_in_order(self, complete):
@@ -205,6 +221,12 @@ class AnswerServiceTests(KnowledgeBaseMixin, TestCase):
         self.assertIsNone(first.page)
         self.assertTrue(THREADS_TEXT.startswith(first.excerpt[:40]))
         self.assertEqual(second.title, "BS Computer Science: Courses")
+
+    def test_grouped_citations_are_renumbered_and_shown(self, complete):
+        chunks = ["A", "B", "C", "D", "E"]
+        text, used = cited_chunks("Threads [4, 5]. Credits [2;4] and [9, 3]. Bad [7, 8].", chunks)
+        self.assertEqual(text, "Threads [1, 2]. Credits [3, 1] and [4]. Bad.")
+        self.assertEqual(used, ["D", "E", "B", "C"])
 
     def test_uncited_answer_falls_back_to_best_chunk(self, complete):
         complete.return_value = "CS 1332 covers data structures."
@@ -260,7 +282,10 @@ class AskViewTests(KnowledgeBaseMixin, TestCase):
         with mock.patch("rag.services.complete") as complete:
             data = self.post({"question": "Who won the world cup?"}).json()
             complete.assert_not_called()
-        self.assertEqual(data, {"answer": NO_RESULT_TEXT, "question_type": "Factual lookup", "sources": []})
+        self.assertTrue(data["answer"].startswith(f'{NO_RESULT_TEXT} "Who won the world cup?"'))
+        self.assertIn("None of its key words appear", data["answer"])
+        self.assertIn("BS Computer Science", data["answer"])
+        self.assertEqual(data["sources"], [])
 
     def test_rejects_bad_requests(self):
         self.assertEqual(self.client.get(ASK_URL).status_code, 405)
@@ -304,3 +329,34 @@ class PromptPreviewTests(KnowledgeBaseMixin, TestCase):
         self.assertIn(INTENTS["comparison"].instructions, data["messages"][0]["content"])
         self.assertIn(COURSE_TEXT, data["messages"][1]["content"])
         self.assertEqual(self.client.get(PREVIEW_URL, {"q": " "}).status_code, 400)
+
+
+@mock.patch("rag.services.complete", return_value="CS 1332 is 3 credit hours [1].")
+class ConversationTests(KnowledgeBaseMixin, TestCase):
+    def ask(self, question):
+        return self.client.post(ASK_URL, json.dumps({"question": question}), content_type="application/json").json()
+
+    def test_follow_up_is_rewritten_with_history(self, complete):
+        self.ask("What is CS 1332?")
+        self.planner.side_effect = None
+        self.planner.return_value = '```json\n{"standalone_question": "How many credits is CS 1332?", "search_terms": ["CS 1332", "credit hours"], "small_talk": false}\n```'
+        data = self.ask("how many credits is it?")
+        self.assertEqual(data["sources"][0]["title"], "BS Computer Science: Courses")
+        planner_input = self.planner.call_args.args[0][1]["content"]
+        self.assertIn("Student: What is CS 1332?", planner_input)
+        self.assertIn("New message: how many credits is it?", planner_input)
+        self.assertIn("Question: How many credits is CS 1332?", complete.call_args.args[0][1]["content"])
+
+    def test_small_talk_needs_no_retrieval(self, complete):
+        self.planner.side_effect = None
+        self.planner.return_value = '{"standalone_question": "hi", "search_terms": [], "small_talk": true}'
+        data = self.ask("hi there")
+        self.assertEqual(data["question_type"], "Small talk")
+        self.assertEqual(data["sources"], [])
+        complete.assert_not_called()
+
+    def test_reset_forgets_history(self, complete):
+        self.ask("What is CS 1332?")
+        self.assertEqual(len(self.client.session["rag_history"]), 1)
+        self.assertEqual(self.client.post(reverse("rag:reset")).status_code, 200)
+        self.assertNotIn("rag_history", self.client.session)

@@ -29,7 +29,7 @@ INTENTS = {
             "Give the specific fact first (the number, course, or policy) in one or two "
             "sentences, quoting exact values from the sources. Do not add background."
         ),
-        retrieval_limit=3,
+        retrieval_limit=4,
         temperature=0.0,
     ),
     "explanation": Intent(
@@ -40,7 +40,7 @@ INTENTS = {
             "Start with the main idea, then the details. Define catalog terms when the "
             "sources define them."
         ),
-        retrieval_limit=5,
+        retrieval_limit=6,
         temperature=0.2,
     ),
     "comparison": Intent(
@@ -52,7 +52,7 @@ INTENTS = {
             "differences in one closing sentence. Say clearly if the sources only describe "
             "one of the options."
         ),
-        retrieval_limit=6,
+        retrieval_limit=8,
         temperature=0.2,
     ),
     "planning": Intent(
@@ -64,14 +64,14 @@ INTENTS = {
             "confirm the plan with their academic advisor. Do not assume which courses the "
             "student has completed unless the question says so."
         ),
-        retrieval_limit=6,
+        retrieval_limit=8,
         temperature=0.2,
     ),
     "general": Intent(
         key="general",
         label="General",
         instructions="Answer in one short paragraph.",
-        retrieval_limit=5,
+        retrieval_limit=6,
         temperature=0.2,
     ),
 }
@@ -159,10 +159,11 @@ GROUNDING_RULES = f"""You are DegreeGuide, an assistant for Georgia Tech undergr
 
 Grounding rules (these override everything else):
 1. Use ONLY the numbered sources provided in the user message. Do not use outside knowledge, even if you are confident.
-2. If the sources contain nothing relevant to the question, reply with exactly {NOT_IN_SOURCES} and nothing else. If they answer only part of the question, answer that part and say plainly what the sources do not cover.
-3. After each statement taken from a source, cite it with its number in square brackets, like [1] or [2]. Cite only numbers that exist.
-4. Never invent course numbers, credit counts, policies, or deadlines that are not written in the sources.
-5. Write plain text. No Markdown, no headings, no tables."""
+2. Some sources may be unrelated to the question. Ignore those and use only the ones that relate to it.
+3. If none of the sources relate to the question, reply with {NOT_IN_SOURCES} followed by one short sentence saying what the sources cover instead and what is missing, without answering from outside knowledge. If related sources answer only part of the question, share what they do say about it and state plainly what they do not cover.
+4. After each statement taken from a source, cite it with its number in square brackets, like [1] or [2]. Cite only numbers that exist.
+5. Never invent course numbers, credit counts, policies, or deadlines that are not written in the sources.
+6. Write plain text. No Markdown, no headings, no tables."""
 
 
 def system_prompt(intent):
@@ -195,8 +196,8 @@ def build_messages(question, chunks, intent=DEFAULT_INTENT):
     user = (
         f"Sources:\n\n{context}\n\n"
         f"Question: {question}\n\n"
-        f"Answer using only the sources above, citing them like [1]. "
-        f"If they do not answer the question, reply with exactly {NOT_IN_SOURCES}."
+        f"Answer using only the sources above that relate to the question, citing them like [1]. "
+        f"If none of them relate to it, reply with {NOT_IN_SOURCES} and one sentence on what is missing."
     )
     return [
         {"role": "system", "content": system_prompt(intent)},

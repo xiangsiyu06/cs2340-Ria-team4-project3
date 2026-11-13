@@ -14,14 +14,15 @@ from dataclasses import dataclass
 from knowledge.models import Chunk
 from knowledge.services import published_chunks, term_vector
 
-TOP_K = 5
+TOP_K = 6
 # A chunk this short is usually a heading or lead-in ("The following classes
 # count toward..."); the content it introduces is in the next chunk.
 SHORT_CHUNK_CHARS = 200
-# Share of the question's weighted terms that a chunk must contain. Below this
-# the corpus has nothing relevant, so the answer service says so instead of
-# guessing. The model's own "not in sources" check is the second guard.
-RELEVANCE_FLOOR = 0.25
+# Retrieval casts a wide net and the model judges relevance (it must reply
+# NOT_IN_SOURCES when nothing it is shown relates to the question). The floor
+# only drops chunks that share almost none of the question's vocabulary.
+# Calibrated on catalog pages and degree-sheet PDFs; see the PR description.
+RELEVANCE_FLOOR = 0.12
 
 # BM25 constants (standard values).
 K1 = 1.5
@@ -42,6 +43,18 @@ STOPWORDS = frozenset(
     work works like mean means get take many much find help about
     """.split()
 )
+
+# Abbreviations students use that the catalog spells out. The original term
+# is kept too, so documents that do use the abbreviation still match.
+ABBREVIATIONS = {
+    "bs": ("bachelor", "science"),
+    "ba": ("bachelor", "art"),
+    "ms": ("master", "science"),
+    "cs": ("computer", "science"),
+    "math": ("mathematic",),
+    "prereq": ("prerequisite",),
+    "coreq": ("corequisite",),
+}
 
 # Course codes such as "cs1332" (ingestion already joins "CS 1332" into one
 # term). One mention is a complete match, so they skip BM25's length penalty.
@@ -73,8 +86,15 @@ def stemmed(vector):
 
 
 def query_terms(question):
-    """Stemmed terms of the question, without stopwords."""
-    return {stem(t) for t in term_vector(question) if t not in STOPWORDS}
+    """Stemmed terms of the question, without stopwords, plus expanded abbreviations."""
+    terms = set()
+    for term in term_vector(question):
+        if term in STOPWORDS:
+            continue
+        term = stem(term)
+        terms.add(term)
+        terms.update(ABBREVIATIONS.get(term, ()))
+    return terms
 
 
 def with_metadata(vector, *labels):
@@ -92,9 +112,16 @@ def with_metadata(vector, *labels):
 def retrieve(question, *, limit=TOP_K, floor=RELEVANCE_FLOOR):
     """Return up to ``limit`` hits scoring at least ``floor``, best first.
 
-    Scores are BM25 divided by the best score any chunk could reach for this
-    question, so they fall between 0 and 1 and ``floor`` is comparable across
-    questions. Only chunks from active, ready sources take part
+    Only question words that appear somewhere in the knowledge base count.
+    A word no document contains ("BS" when the catalog writes "Bachelor of
+    Science") cannot tell chunks apart, so it must not drag every chunk's
+    score down. If none of the question's words appear anywhere, there is
+    nothing to retrieve and the answer service refuses without calling the
+    model.
+
+    Scores are BM25 divided by the best score any chunk could reach for the
+    known words, so they fall between 0 and 1 and ``floor`` is comparable
+    across questions. Only chunks from active, ready sources take part
     (``published_chunks``), so inactive or half-imported data never reaches
     an answer.
     """
@@ -117,16 +144,20 @@ def retrieve(question, *, limit=TOP_K, floor=RELEVANCE_FLOOR):
         document_frequency.update(vector.keys())
     average_length = sum(sum(v.values()) for _, v in corpus) / total
 
+    known = {term for term in terms if document_frequency[term]}
+    if not known:
+        return []
+
     def idf(term):
         df = document_frequency[term]
         return math.log(1 + (total - df + 0.5) / (df + 0.5))
 
-    best_possible = sum(idf(t) * (K1 + 1) for t in terms)
+    best_possible = sum(idf(t) * (K1 + 1) for t in known)
     scored = []
     for chunk_id, vector in corpus:
         length_norm = K1 * (1 - B + B * sum(vector.values()) / average_length)
         score = 0.0
-        for term in terms:
+        for term in known:
             tf = vector.get(term)
             if not tf:
                 continue

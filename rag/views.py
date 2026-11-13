@@ -3,6 +3,7 @@ staff-only preview of how the prompt is chosen for a question."""
 
 import json
 import logging
+import time
 
 from django.contrib.admin.views.decorators import staff_member_required
 from django.http import JsonResponse
@@ -27,8 +28,9 @@ def ask(request):
         return JsonResponse({"error": "Invalid JSON."}, status=400)
     question = payload.get("question") if isinstance(payload, dict) else None
 
+    history = conversation(request)
     try:
-        result = answer(question)
+        result = answer(question, history)
     except InvalidQuestion as exc:
         return JsonResponse({"error": str(exc)}, status=400)
     except LLMUnavailable as exc:
@@ -37,7 +39,33 @@ def ask(request):
             {"error": "The answer service is temporarily unavailable. Please try again in a moment."},
             status=503,
         )
+    remember(request, history, question, result.text)
     return JsonResponse(result.as_dict())
+
+
+# Follow-up questions ("how can I study it?") need the last few turns. They are
+# kept in the visitor's session, expire after 30 minutes of inactivity, and
+# can be cleared with POST /rag/reset/.
+HISTORY_TURNS = 3
+HISTORY_SECONDS = 30 * 60
+
+
+def conversation(request):
+    turns = request.session.get("rag_history", [])
+    if turns and time.time() - turns[-1].get("t", 0) > HISTORY_SECONDS:
+        return []
+    return turns[-HISTORY_TURNS:]
+
+
+def remember(request, history, question, text):
+    request.session["rag_history"] = [*history, {"q": str(question)[:500], "a": text[:500], "t": time.time()}][-HISTORY_TURNS:]
+
+
+@require_POST
+def reset(request):
+    """POST /rag/reset/ forgets the conversation (for a "New conversation" button)."""
+    request.session.pop("rag_history", None)
+    return JsonResponse({"ok": True})
 
 
 @staff_member_required
