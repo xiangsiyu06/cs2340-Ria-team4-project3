@@ -1,56 +1,11 @@
-{# TODO: templates/base.html does not exist yet. Once Bingchang pushes it, make the knowledge pages extend "base.html" instead of this file, then delete this file. #}
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Data sources{% endblock %} · DegreeGuide</title>
-  <style>
-    body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; color: #1f2933; background: #f7f8fa; }
-    header { background: #003057; color: #fff; padding: 12px 24px; display: flex; justify-content: space-between; align-items: center; }
-    header a { color: #fff; }
-    main { max-width: 1100px; margin: 0 auto; padding: 24px; }
-    h1 { font-size: 1.5rem; margin: 0 0 16px; }
-    a { color: #0b5cad; }
-    table { width: 100%; border-collapse: collapse; background: #fff; }
-    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e3e6ea; vertical-align: top; }
-    th { background: #eef1f4; font-weight: 600; }
-    small { color: #5f6b76; }
-    .page-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-    .page-head h1 { margin: 0; }
-    .button, button { display: inline-block; padding: 6px 12px; border: 1px solid #0b5cad; border-radius: 4px; background: #0b5cad; color: #fff; text-decoration: none; font: inherit; cursor: pointer; }
-    .button.secondary, button.secondary { background: #fff; color: #0b5cad; }
-    button.danger { background: #b42318; border-color: #b42318; }
-    .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .actions form { margin: 0; }
-    .status { font-weight: 600; }
-    .status-ready { color: #067647; }
-    .status-failed { color: #b42318; }
-    .status-ingesting { color: #b54708; }
-    .messages { list-style: none; padding: 0; margin: 0 0 16px; }
-    .messages li { padding: 10px 12px; border-radius: 4px; margin-bottom: 8px; background: #eef4ff; }
-    .messages li.success { background: #ecfdf3; }
-    .messages li.warning { background: #fffaeb; }
-    .messages li.error { background: #fef3f2; }
-    form.stacked div { margin-bottom: 14px; }
-    form.stacked label { display: block; font-weight: 600; margin-bottom: 4px; }
-    form.stacked input[type=text], form.stacked input[type=url], form.stacked select { width: 100%; max-width: 480px; padding: 6px; box-sizing: border-box; }
-    .errorlist { color: #b42318; margin: 4px 0; padding-left: 18px; }
-    .helptext { display: block; color: #5f6b76; font-size: 0.875rem; }
-  </style>
-</head>
-<body>
-  <header>
-    <strong>DegreeGuide · Knowledge base</strong>
-    {% if user.is_authenticated %}<span>Signed in as {{ user.get_username }} · <a href="{% url 'admin:index' %}">Admin</a></span>{% endif %}
-  </header>
-  <main>
-    {% if messages %}
-      <ul class="messages">
-        {% for message in messages %}<li class="{{ message.tags }}">{{ message }}</li>{% endfor %}
-      </ul>
-    {% endif %}
-    {% block content %}{% endblock %}
-  </main>
-</body>
-</html>
+{% extends "base.html" %}
+{% block title %}Data sources · DegreeGuide{% endblock %}
+{% block breadcrumb %}Knowledge base{% endblock %}
+{% block chat_current %}{% endblock %}
+{% block content %}
+<div class="knowledge-page">
+  {% if user.is_authenticated %}<p class="staff-account">Signed in as {{ user.get_username }} · <a href="{% url 'admin:index' %}">Admin</a></p>{% endif %}
+  {% if messages %}<ul class="messages">{% for message in messages %}<li class="{{ message.tags }}">{{ message }}</li>{% endfor %}</ul>{% endif %}
+  {% block knowledge_content %}{% endblock %}
+</div>
+{% endblock %}

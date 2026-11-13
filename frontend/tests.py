@@ -10,6 +10,7 @@ from devpreview import settings as preview_settings
     ROOT_URLCONF="devpreview.urls",
     INSTALLED_APPS=preview_settings.INSTALLED_APPS,
     MIDDLEWARE=preview_settings.MIDDLEWARE,
+    DEGREEGUIDE_CHAT_API_URL=preview_settings.DEGREEGUIDE_CHAT_API_URL,
 )
 class FrontendTests(SimpleTestCase):
     def test_home_renders_live_endpoint_and_csrf_token(self):

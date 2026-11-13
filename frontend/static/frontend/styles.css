@@ -39,6 +39,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
 .nav-item { display: flex; align-items: center; gap: 12px; padding: 13px 12px; margin-bottom: 7px; border: 0; border-radius: 9px; background: transparent; text-decoration: none; font-size: 12px; width: 100%; text-align: left; color: var(--muted); }
 .nav-item svg { width: 18px; height: 18px; }
 .nav-item > span:last-child { margin-left: auto; }
+.sources-nav .nav-label { margin-left: 0; }
 .nav-item.active { background: #e3eadd; color: var(--forest); font-weight: 600; }
 .nav-item:hover { background: var(--sage); color: var(--forest); }
 .sidebar-note { margin: auto 3px 29px; padding: 25px 19px 20px; border: 1px solid #dce4d5; border-radius: var(--radius); background: linear-gradient(140deg, #eef2e5, #f4f5ee); }
@@ -138,14 +139,40 @@ details[open] .source-chevron { transform: rotate(45deg); }
 .sample-document { max-width: 700px; margin: 45px auto; }
 .sample-document h1 { font: 36px/1.2 var(--font-display); }
 .sample-document p { color: var(--muted); }
+.knowledge-page { max-width: 1100px; margin: auto; padding: 28px; overflow-wrap: anywhere; }
+.knowledge-page h1 { font: 34px/1.2 var(--font-display); margin: 0 0 20px; }
+.knowledge-page .staff-account { text-align: right; color: var(--muted); font-size: 12px; }
+.knowledge-page .page-head, .knowledge-page .actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.knowledge-page .page-head { margin-bottom: 20px; }
+.knowledge-page .page-head h1 { margin: 0; }
+.knowledge-page .actions { justify-content: flex-start; }
+.knowledge-page .actions form { margin: 0; }
+.knowledge-page table { display: block; width: 100%; overflow-x: auto; border-collapse: collapse; background: white; }
+.knowledge-page th, .knowledge-page td { text-align: left; padding: 10px; border-bottom: 1px solid var(--line); vertical-align: top; font-size: 12px; }
+.knowledge-page th { background: var(--sage); white-space: nowrap; }
+.knowledge-page small, .knowledge-page .helptext { color: var(--muted); }
+.knowledge-page button { padding: 7px 12px; border: 1px solid var(--forest); border-radius: 7px; background: var(--forest); color: white; }
+.knowledge-page .secondary { background: white; color: var(--forest); border: 1px solid var(--line); }
+.knowledge-page button.danger { background: var(--error); border-color: var(--error); }
+.knowledge-page .messages { padding: 0; list-style: none; }
+.knowledge-page .messages li { padding: 12px; margin-bottom: 10px; border-radius: 8px; background: var(--sage); }
+.knowledge-page .messages li.error, .knowledge-page .messages li.warning { background: #fff4ed; color: var(--error); }
+.knowledge-page .status-ready { color: var(--forest); font-weight: 600; }
+.knowledge-page .status-failed, .knowledge-page .errorlist { color: var(--error); }
+.knowledge-page .stacked > div { margin-bottom: 16px; }
+.knowledge-page .stacked label { display: block; margin-bottom: 5px; font-weight: 600; }
+.knowledge-page .stacked input:not([type=checkbox]):not([type=hidden]), .knowledge-page .stacked select { max-width: 100%; width: 480px; padding: 9px; border: 1px solid var(--line); border-radius: 7px; font: inherit; }
+.knowledge-page .helptext { display: block; font-size: 12px; }
 @media (min-width: 1500px) { .welcome h1 { font-size: 66px; } .welcome { padding: 65px 0; } }
 @media (max-width: 1100px) { .sidebar { width: 230px; padding-left: 16px; padding-right: 16px; } .chat-page { padding-left: 25px; padding-right: 25px; } .topbar { padding: 0 25px; } .topbar-tag { display: none; } .suggestions { gap: 8px; } .suggestion { padding: 16px 12px; } .suggestion strong { font-size: 10px; } .suggestion > span:not(.suggestion-icon):not(.suggestion-arrow) { font-size: 9px; } }
 @media (max-width: 760px) {
   .app-shell { display: block; }
   .sidebar { position: static; width: 100%; height: auto; padding: 15px 20px; border-right: 0; border-bottom: 1px solid var(--line); flex-direction: row; align-items: center; justify-content: space-between; gap: 15px; }
   .brand { font-size: 20px; } .brand-mark { width: 36px; height: 36px; border-radius: 10px; font-size: 24px; } .brand small { display: none; }
-  .workspace-label, .sidebar-note, .sidebar-footer, .nav-item.active, .topbar { display: none; }
+  .workspace-label, .sidebar-note, .sidebar-footer, .chat-nav, .topbar { display: none; }
   .nav-item { margin: 0; padding: 8px; width: auto; font-size: 11px; gap: 7px; } .nav-item svg { width: 16px; height: 16px; }
+  .sidebar nav { display: flex; align-items: center; } .sources-nav .nav-label { display: none; }
+  .knowledge-page { padding: 20px 15px; }
   .chat-page { min-height: calc(100dvh - 67px); padding: 19px 20px 18px; }
   .section-label { font-size: 8px; letter-spacing: 1.1px; } .button-subtle { font-size: 10px; padding: 5px 8px; }
   .welcome { padding: 36px 0 12px; } .welcome-symbol { width: 52px; height: 52px; margin-bottom: 19px; }

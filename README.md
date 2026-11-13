@@ -4,7 +4,7 @@ DegreeGuide is a web-hosted RAG chatbot that answers undergraduate students' que
 
 CS 2340 Objects and Design, Fall 2026, Project 3. Team Ria 4.
 
-**Stack:** Django 5.2, SQLite, deployed on PythonAnywhere. The LLM, embedding model, and vector store have not been chosen yet.
+**Stack:** Django 5.2, SQLite, and the team's sparse retrieval index. The RAG service uses the model endpoint configured in `.env`; deployment is owned by Yinuo.
 
 ## Run locally
 
@@ -28,13 +28,22 @@ python manage.py migrate
 python manage.py runserver
 ```
 
-The server runs at http://127.0.0.1:8000/. Until the first views are merged, `/admin/` is the only working route.
+The server runs at http://127.0.0.1:8000/ and opens the connected chatbot at
+`/chat/`. It posts questions to Yuhang's `/rag/ask/` endpoint and displays the
+returned answer, question type, and cited sources. Manage catalog/PDF documents
+at `/knowledge/sources/` using a staff account (`python manage.py createsuperuser`).
 
-### Bingchang's Sprint 1 frontend preview
+Import at least one active document using **Re-ingest**, and set `LLM_API_KEY`
+in your ignored `.env` for generated answers. Optional `LLM_API_URL`, `LLM_MODEL`,
+and `LLM_REASONING_EFFORT` use the defaults in `.env.example`. Without matching
+documents the service returns a real no-result answer; without a configured model
+key, a matching question produces a recoverable service error.
+
+### Standalone UI preview (optional)
 
 The reusable `frontend/` app contains the US2 chat interface, US4 source cards,
-and shared UI styles. It is not yet mounted in the shared project or connected
-to Yuhang's RAG API. `manage.py` continues to use the team's `config.settings`.
+and shared UI styles. It is mounted through the team's `chat` app and connected
+to Yuhang's RAG API. `manage.py` uses the team's `config.settings`.
 To review the frontend independently, run:
 
 ```bash
@@ -42,15 +51,16 @@ python manage.py runserver --settings=devpreview.settings
 ```
 
 Open http://127.0.0.1:8000/preview/ for clearly labeled sample responses. This
-preview uses no database or API keys. Its `/` route targets the proposed live
-API and reports unavailable until integration; sample routes are local fixtures.
+preview uses no database or API keys. Its `/` route deliberately reports unavailable;
+use the shared project's `/chat/` for the integrated flow.
 
 ```bash
 python manage.py test frontend --settings=devpreview.settings
 ```
 
 Optional browser checks: Node 20+, Google Chrome, `npm ci`, then `npm test`.
-Playwright starts the preview server using `.venv/bin/python`.
+Playwright starts a preview server on port 8003 and a shared-project server on
+port 8002 using `.venv/bin/python`. Set up `.env` and run migrations first.
 See [the handoff](docs/sprint-1-handoff.md), [API contract](docs/chat-api.md),
 and [UI guide](docs/ui-system.md) for integration and hosted acceptance work.
 
