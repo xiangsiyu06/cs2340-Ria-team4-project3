@@ -193,21 +193,21 @@ class PromptTests(KnowledgeBaseMixin, TestCase):
         self.assertIn("[1] BS Computer Science (Computer Science, 2026-2027) - section: Threads", user)
         self.assertIn("[2] BS Computer Science", user)
         self.assertIn(COURSE_TEXT, user)
-        self.assertTrue(user.rstrip().endswith(f"reply with exactly {NOT_IN_SOURCES}."))
+        self.assertTrue(user.rstrip().endswith(f"reply with {NOT_IN_SOURCES} and one sentence on what is missing."))
 
 
 @mock.patch("rag.services.complete")
 class AnswerServiceTests(KnowledgeBaseMixin, TestCase):
     def test_no_relevant_chunks_means_no_model_call(self, complete):
         result = answer("How do I bake sourdough bread?")
-        self.assertEqual(result.text, NO_RESULT_TEXT)
+        self.assertTrue(result.text.startswith(NO_RESULT_TEXT))
         self.assertEqual(result.sources, [])
         complete.assert_not_called()
 
     def test_model_can_decline_when_sources_do_not_answer(self, complete):
         complete.return_value = NOT_IN_SOURCES
         result = answer("What is the CS 1332 grading policy?")
-        self.assertEqual(result.text, NO_RESULT_TEXT)
+        self.assertTrue(result.text.startswith(NO_RESULT_TEXT))
         self.assertEqual(result.sources, [])
 
     def test_sources_are_the_cited_chunks_in_order(self, complete):
@@ -282,7 +282,10 @@ class AskViewTests(KnowledgeBaseMixin, TestCase):
         with mock.patch("rag.services.complete") as complete:
             data = self.post({"question": "Who won the world cup?"}).json()
             complete.assert_not_called()
-        self.assertEqual(data, {"answer": NO_RESULT_TEXT, "question_type": "Factual lookup", "sources": []})
+        self.assertTrue(data["answer"].startswith(f'{NO_RESULT_TEXT} "Who won the world cup?"'))
+        self.assertIn("None of its key words appear", data["answer"])
+        self.assertIn("BS Computer Science", data["answer"])
+        self.assertEqual(data["sources"], [])
 
     def test_rejects_bad_requests(self):
         self.assertEqual(self.client.get(ASK_URL).status_code, 405)

@@ -23,11 +23,8 @@ MAX_QUESTION_LENGTH = 2000
 GREETING = re.compile(r"^(hi|hello|hey|thanks|thank you|good (morning|afternoon|evening))\b[\s!.,]*\S{0,20}[\s!.]*$", re.I)
 EXCERPT_LENGTH = 300
 
-NO_RESULT_TEXT = (
-    "I couldn't find anything about that in DegreeGuide's catalog data, so I won't guess. "
-    "Try asking about a specific degree requirement, course, or prerequisite, "
-    "or check the official catalog and your academic advisor."
-)
+# Every "couldn't find" reply starts with this, then says what and why.
+NO_RESULT_TEXT = "I couldn't find an answer to"
 
 
 class InvalidQuestion(ValueError):
@@ -70,8 +67,24 @@ def clean_question(question):
     return question
 
 
-def no_result(intent=None):
-    return Answer(NO_RESULT_TEXT, [], intent)
+def no_result(intent=None, question="", reason=""):
+    """A natural "couldn't find" reply: what was asked, why it failed, and what is covered."""
+    from knowledge.models import DataSource
+
+    topic = question if len(question) <= 120 else question[:117] + "..."
+    names = list(dict.fromkeys(
+        DataSource.objects.filter(is_active=True, status=DataSource.Status.READY).values_list("name", flat=True)
+    ))[:6]
+    covers = ", ".join(names) if names else "no sources yet"
+    reason = reason.strip() or "None of the passages I have answer it."
+    if not reason.endswith((".", "!", "?")):
+        reason += "."
+    text = (
+        f'{NO_RESULT_TEXT} "{topic}" in DegreeGuide\'s catalog data. {reason} '
+        f"Right now I can answer from: {covers}. Try asking about the requirements or courses there, "
+        f"or check the official catalog and your academic advisor."
+    )
+    return Answer(text, [], intent)
 
 
 def excerpt(text):
@@ -150,7 +163,7 @@ def answer(question, history=()) -> Answer:
         # Shares no words with the knowledge base and isn't a follow-up:
         # refuse without spending a model call.
         logger.info("No overlap with the knowledge base: %r", question)
-        return no_result(classify(question).intent.label)
+        return no_result(classify(question).intent.label, question, "None of its key words appear in the sources I have.")
     planned = plan(question, history)
     if planned.small_talk:
         return Answer(SMALL_TALK_TEXT, [], "Small talk")
@@ -159,12 +172,14 @@ def answer(question, history=()) -> Answer:
     hits = retrieve_for(question, intent, planned.search_text)
     if not hits:
         logger.info("No relevant chunks for %s question: %r", intent.key, question)
-        return no_result(intent.label)
+        return no_result(intent.label, question, "The closest passages weren't related enough to answer it.")
 
     chunks = with_neighbors(hits)
     text = complete(build_messages(question, chunks, intent), temperature=intent.temperature)
     if NOT_IN_SOURCES in text:
-        return no_result(intent.label)
+        # The model may add one sentence on what the sources do cover.
+        reason = text.split(NOT_IN_SOURCES, 1)[1].strip(" :-\n")[:300]
+        return no_result(intent.label, question, reason or "I found related passages, but none of them answer it.")
 
     text, used = cited_chunks(text, chunks)
     return Answer(text=text, sources=[source_for(chunk) for chunk in used], intent=intent.label)

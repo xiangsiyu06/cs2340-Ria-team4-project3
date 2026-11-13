@@ -160,7 +160,7 @@ GROUNDING_RULES = f"""You are DegreeGuide, an assistant for Georgia Tech undergr
 Grounding rules (these override everything else):
 1. Use ONLY the numbered sources provided in the user message. Do not use outside knowledge, even if you are confident.
 2. Some sources may be unrelated to the question. Ignore those and use only the ones that relate to it.
-3. If none of the sources relate to the question, reply with exactly {NOT_IN_SOURCES} and nothing else. If related sources answer only part of the question, share what they do say about it and state plainly what they do not cover.
+3. If none of the sources relate to the question, reply with {NOT_IN_SOURCES} followed by one short sentence saying what the sources cover instead and what is missing, without answering from outside knowledge. If related sources answer only part of the question, share what they do say about it and state plainly what they do not cover.
 4. After each statement taken from a source, cite it with its number in square brackets, like [1] or [2]. Cite only numbers that exist.
 5. Never invent course numbers, credit counts, policies, or deadlines that are not written in the sources.
 6. Write plain text. No Markdown, no headings, no tables."""
@@ -197,7 +197,7 @@ def build_messages(question, chunks, intent=DEFAULT_INTENT):
         f"Sources:\n\n{context}\n\n"
         f"Question: {question}\n\n"
         f"Answer using only the sources above that relate to the question, citing them like [1]. "
-        f"If none of them relate to it, reply with exactly {NOT_IN_SOURCES}."
+        f"If none of them relate to it, reply with {NOT_IN_SOURCES} and one sentence on what is missing."
     )
     return [
         {"role": "system", "content": system_prompt(intent)},

@@ -61,7 +61,7 @@ class ConnectedChatTests(TestCase):
     @patch("rag.llm.urlopen")
     def test_unsupported_question_uses_real_no_result_flow(self, provider):
         result = self.ask("How do I bake sourdough bread?").json()
-        self.assertEqual(result["answer"], NO_RESULT_TEXT)
+        self.assertTrue(result["answer"].startswith(NO_RESULT_TEXT))
         self.assertEqual(result["sources"], [])
         provider.assert_not_called()
 
