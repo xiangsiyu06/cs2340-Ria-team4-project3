@@ -14,7 +14,7 @@ from .llm import complete
 from .planner import SMALL_TALK_TEXT, plan
 
 THANKS_TEXT = "You're welcome! Ask me anything else about your degree requirements or courses."
-from .prompts import NOT_IN_SOURCES, build_messages, classify, comparison_sides
+from .prompts import INTENTS, NOT_IN_SOURCES, build_messages, classify, comparison_sides
 from .retrieval import retrieve, with_neighbors
 
 logger = logging.getLogger(__name__)
@@ -149,6 +149,11 @@ def retrieve_for(question, intent, search_text=None):
     return sorted(best.values(), key=lambda hit: hit.score, reverse=True)[: intent.retrieval_limit]
 
 
+def choose_intent(planned):
+    """US8: the planner's question type, or the keyword rules when it gave none."""
+    return INTENTS.get(planned.intent_key) or classify(planned.question).intent
+
+
 def answer(question, history=()) -> Answer:
     """Answer ``question`` from the knowledge base, or say that it cannot.
 
@@ -168,7 +173,7 @@ def answer(question, history=()) -> Answer:
     if planned.small_talk:
         return Answer(SMALL_TALK_TEXT, [], "Small talk")
     question = planned.question
-    intent = classify(question).intent
+    intent = choose_intent(planned)
     hits = retrieve_for(question, intent, planned.search_text)
     if not hits:
         logger.info("No relevant chunks for %s question: %r", intent.key, question)

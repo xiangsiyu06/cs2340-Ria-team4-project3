@@ -10,9 +10,10 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_GET, require_POST
 
 from .llm import LLMUnavailable
+from .planner import plan
 from .prompts import build_messages, classify
 from .retrieval import with_neighbors
-from .services import InvalidQuestion, answer, clean_question, retrieve_for
+from .services import InvalidQuestion, answer, choose_intent, clean_question, retrieve_for
 
 logger = logging.getLogger(__name__)
 
@@ -73,29 +74,35 @@ def reset(request):
 def prompt_preview(request):
     """GET /rag/prompt-preview/?q=... shows the runtime prompt selection (US8).
 
-    Returns the detected intent, the rule that matched, the chunks retrieved
-    for that intent, and the exact messages that would be sent to the model.
-    No model call is made.
+    Returns the question type and who chose it (the planner, or the keyword
+    rules as fallback), the planner's standalone question and search terms,
+    the chunks retrieved, and the exact messages that would be sent to the
+    model. One planner call is made; the answer call is not.
     """
     try:
         question = clean_question(request.GET.get("q", ""))
     except InvalidQuestion as exc:
         return JsonResponse({"error": str(exc)}, status=400)
-    classification = classify(question)
-    intent = classification.intent
-    hits = retrieve_for(question, intent)
+    planned = plan(question)
+    rules = classify(planned.question)
+    intent = choose_intent(planned)
+    hits = retrieve_for(planned.question, intent, planned.search_text)
     chunks = with_neighbors(hits)
     return JsonResponse({
         "question": question,
+        "standalone_question": planned.question,
+        "search_text": planned.search_text,
         "question_type": intent.label,
         "intent": intent.key,
-        "matched_rule": classification.rule,
-        "matched_text": classification.matched,
+        "type_chosen_by": "planner" if planned.intent_key else "keyword rules",
+        "keyword_rules_would_pick": rules.intent.key,
+        "matched_rule": rules.rule,
+        "matched_text": rules.matched,
         "retrieval_limit": intent.retrieval_limit,
         "temperature": intent.temperature,
         "retrieved": [
             {"score": hit.score, "source": hit.chunk.source.name, "section": hit.chunk.section}
             for hit in hits
         ],
-        "messages": build_messages(question, chunks, intent) if chunks else [],
+        "messages": build_messages(planned.question, chunks, intent) if chunks else [],
     }, json_dumps_params={"indent": 2})
