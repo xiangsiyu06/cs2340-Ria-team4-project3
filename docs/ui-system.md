@@ -6,6 +6,9 @@ The current visual direction is a proposal pending mentor/client feedback.
 ## Shared files
 
 - `frontend/templates/frontend/base.html`: navigation, header, skip link, help dialog.
+- `templates/base.html`: shared entry point that extends the frontend base.
+- `knowledge/templates/knowledge/layout.html`: source-management wrapper using
+  that shared base; knowledge pages override `knowledge_content`.
 - `frontend/static/frontend/styles.css`: tokens, components, responsive layouts.
 - `frontend/templates/frontend/chat.html`: US2/US4 page.
 - `frontend/static/frontend/chat.js`: submissions and answer/source rendering.
@@ -30,7 +33,7 @@ Round panels use `--radius` (14px); controls use smaller corners.
 ## Reuse in another page
 
 ```django
-{% extends 'frontend/base.html' %}
+{% extends 'base.html' %}
 {% block title %}Dataset · DegreeGuide{% endblock %}
 {% block chat_current %}{% endblock %}
 {% block breadcrumb %}Dataset{% endblock %}
