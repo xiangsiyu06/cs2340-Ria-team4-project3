@@ -10,8 +10,8 @@ from knowledge.services import term_vector
 
 from .llm import LLMUnavailable
 from .prompts import INTENTS, NOT_IN_SOURCES, build_messages, classify, comparison_sides
-from .retrieval import retrieve, with_neighbors
-from .services import NO_RESULT_TEXT, InvalidQuestion, answer, retrieve_for
+from .retrieval import RELEVANCE_FLOOR, query_terms, retrieve, with_neighbors
+from .services import NO_RESULT_TEXT, InvalidQuestion, answer, cited_chunks, retrieve_for
 
 ASK_URL = reverse("rag:ask")
 PREVIEW_URL = reverse("rag:prompt_preview")
@@ -77,6 +77,17 @@ class RetrievalTests(KnowledgeBaseMixin, TestCase):
     def test_only_active_ready_sources_take_part(self):
         chunks = {hit.chunk for hit in retrieve("Threads threads", floor=0.0)}
         self.assertEqual(chunks, {self.threads})
+
+    def test_word_missing_from_knowledge_base_does_not_sink_question(self):
+        # No chunk says "BS" or "graduation", but the threads chunk is about the
+        # Bachelor of Science in Computer Science and must still be found.
+        hits = retrieve("What does the BS in computer science need for graduation?")
+        self.assertEqual(hits[0].chunk, self.threads)
+        self.assertGreater(hits[0].score, 2 * RELEVANCE_FLOOR)
+
+    def test_abbreviations_expand_and_keep_the_original(self):
+        terms = query_terms("prereqs for the BS and MS in math")
+        self.assertLessEqual({"prereq", "prerequisite", "bs", "bachelor", "ms", "master", "science", "math", "mathematic"}, terms)
 
     def test_unrelated_question_returns_nothing(self):
         self.assertEqual(retrieve("How do I bake sourdough bread?"), [])
@@ -173,6 +184,7 @@ class PromptTests(KnowledgeBaseMixin, TestCase):
         messages = build_messages("What is CS 1332?", [self.threads, self.course])
         self.assertEqual([m["role"] for m in messages], ["system", "user"])
         self.assertIn(NOT_IN_SOURCES, messages[0]["content"])
+        self.assertIn("Some sources may be unrelated to the question. Ignore those", messages[0]["content"])
         user = messages[1]["content"]
         self.assertIn("[1] BS Computer Science (Computer Science, 2026-2027) - section: Threads", user)
         self.assertIn("[2] BS Computer Science", user)
@@ -205,6 +217,12 @@ class AnswerServiceTests(KnowledgeBaseMixin, TestCase):
         self.assertIsNone(first.page)
         self.assertTrue(THREADS_TEXT.startswith(first.excerpt[:40]))
         self.assertEqual(second.title, "BS Computer Science: Courses")
+
+    def test_grouped_citations_are_renumbered_and_shown(self, complete):
+        chunks = ["A", "B", "C", "D", "E"]
+        text, used = cited_chunks("Threads [4, 5]. Credits [2;4] and [9, 3]. Bad [7, 8].", chunks)
+        self.assertEqual(text, "Threads [1, 2]. Credits [3, 1] and [4]. Bad.")
+        self.assertEqual(used, ["D", "E", "B", "C"])
 
     def test_uncited_answer_falls_back_to_best_chunk(self, complete):
         complete.return_value = "CS 1332 covers data structures."

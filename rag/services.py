@@ -85,23 +85,31 @@ def source_for(chunk):
     return Source(title=title, url=chunk.citation_url, page=chunk.page_number, excerpt=excerpt(chunk.text))
 
 
+# One citation group: [2], or a list the model sometimes writes, like [4, 5].
+CITATION = re.compile(r"\[(\d+(?:\s*[,;]\s*\d+)*)\]")
+
+
 def cited_chunks(text, chunks):
     """Chunks referenced as [n] in the answer, in order of first mention.
 
     Citations are renumbered to match the returned source list, so [1] in the
-    answer is always the first source shown. Unknown numbers are dropped. If
-    the model cited nothing, fall back to the best-matching chunk so every
-    answer shows a source.
+    answer is always the first source shown. Grouped citations such as [4, 5]
+    are handled too. Unknown numbers are dropped. If the model cited nothing,
+    fall back to the best-matching chunk so every answer shows a source.
     """
     order = {}
 
     def renumber(match):
-        index = int(match.group(1)) - 1
-        if not 0 <= index < len(chunks):
-            return ""
-        return f"[{order.setdefault(index, len(order) + 1)}]"
+        numbers = []
+        for part in re.split(r"\s*[,;]\s*", match.group(1)):
+            index = int(part) - 1
+            if 0 <= index < len(chunks):
+                number = order.setdefault(index, len(order) + 1)
+                if number not in numbers:
+                    numbers.append(number)
+        return "[" + ", ".join(map(str, numbers)) + "]" if numbers else ""
 
-    text = re.sub(r"\[(\d+)\]", renumber, text)
+    text = CITATION.sub(renumber, text)
     text = re.sub(r"[ \t]+(?=[.,;:!?\n])", "", re.sub(r"[ \t]{2,}", " ", text)).strip()
     used = [chunks[index] for index in order] or chunks[:1]
     return text, used
