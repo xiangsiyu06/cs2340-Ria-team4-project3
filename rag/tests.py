@@ -52,6 +52,10 @@ def make_chunk(source, position, text, section="", anchor=""):
 
 class KnowledgeBaseMixin:
     def setUp(self):
+        # The planner's model call is off by default, so it falls back to the original question.
+        planner = mock.patch("rag.planner.complete", side_effect=LLMUnavailable("off in tests"))
+        self.planner = planner.start()
+        self.addCleanup(planner.stop)
         self.cs = make_source("BS Computer Science", "Computer Science")
         self.threads = make_chunk(self.cs, 0, THREADS_TEXT, section="Threads", anchor="threads")
         self.course = make_chunk(self.cs, 1, COURSE_TEXT, section="Courses")
@@ -322,3 +326,34 @@ class PromptPreviewTests(KnowledgeBaseMixin, TestCase):
         self.assertIn(INTENTS["comparison"].instructions, data["messages"][0]["content"])
         self.assertIn(COURSE_TEXT, data["messages"][1]["content"])
         self.assertEqual(self.client.get(PREVIEW_URL, {"q": " "}).status_code, 400)
+
+
+@mock.patch("rag.services.complete", return_value="CS 1332 is 3 credit hours [1].")
+class ConversationTests(KnowledgeBaseMixin, TestCase):
+    def ask(self, question):
+        return self.client.post(ASK_URL, json.dumps({"question": question}), content_type="application/json").json()
+
+    def test_follow_up_is_rewritten_with_history(self, complete):
+        self.ask("What is CS 1332?")
+        self.planner.side_effect = None
+        self.planner.return_value = '```json\n{"standalone_question": "How many credits is CS 1332?", "search_terms": ["CS 1332", "credit hours"], "small_talk": false}\n```'
+        data = self.ask("how many credits is it?")
+        self.assertEqual(data["sources"][0]["title"], "BS Computer Science: Courses")
+        planner_input = self.planner.call_args.args[0][1]["content"]
+        self.assertIn("Student: What is CS 1332?", planner_input)
+        self.assertIn("New message: how many credits is it?", planner_input)
+        self.assertIn("Question: How many credits is CS 1332?", complete.call_args.args[0][1]["content"])
+
+    def test_small_talk_needs_no_retrieval(self, complete):
+        self.planner.side_effect = None
+        self.planner.return_value = '{"standalone_question": "hi", "search_terms": [], "small_talk": true}'
+        data = self.ask("hi there")
+        self.assertEqual(data["question_type"], "Small talk")
+        self.assertEqual(data["sources"], [])
+        complete.assert_not_called()
+
+    def test_reset_forgets_history(self, complete):
+        self.ask("What is CS 1332?")
+        self.assertEqual(len(self.client.session["rag_history"]), 1)
+        self.assertEqual(self.client.post(reverse("rag:reset")).status_code, 200)
+        self.assertNotIn("rag_history", self.client.session)
