@@ -178,7 +178,7 @@ def answer(question, history=()) -> Answer:
     text = complete(build_messages(question, chunks, intent), temperature=intent.temperature)
     if NOT_IN_SOURCES in text:
         # The model may add one sentence on what the sources do cover.
-        reason = text.split(NOT_IN_SOURCES, 1)[1].strip(" :-\n")[:300]
+        reason = text.split(NOT_IN_SOURCES, 1)[1].strip(" .:-\n")[:300]
         return no_result(intent.label, question, reason or "I found related passages, but none of them answer it.")
 
     text, used = cited_chunks(text, chunks)
