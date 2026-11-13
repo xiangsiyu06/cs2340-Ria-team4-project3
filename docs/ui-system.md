@@ -26,8 +26,12 @@ The current visual direction is a proposal pending mentor/client feedback.
 | `--line` | `#dfe5dc` | Dividers and borders |
 | `--error` | `#963d2f` | Recoverable error text |
 
-Body/UI: platform sans-serif. Display headings: Georgia serif. Both are local
-system fonts, without remote font requests. Use short, direct, supportive copy.
+Body/UI: self-hosted Inter 4.1 variable font, with Apple's system font and Segoe UI
+as fallbacks. Display headings retain Georgia serif. No remote font requests are
+made at runtime. Font source: https://github.com/rsms/inter/tree/v4.1; the SIL Open
+Font License is included alongside the font in `frontend/static/frontend/fonts/`.
+Use short, direct, supportive copy. Action labels stay on one line and controls
+do not shrink; wide source tables scroll within their own labeled region.
 Round panels use `--radius` (14px); controls use smaller corners.
 
 ## Reuse in another page
