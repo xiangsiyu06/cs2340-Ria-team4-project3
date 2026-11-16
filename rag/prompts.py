@@ -9,7 +9,6 @@ retrieved sources. Each intent also tunes retrieval depth and temperature.
 import re
 from dataclasses import dataclass
 
-NOT_IN_SOURCES = "NOT_IN_SOURCES"
 
 
 @dataclass(frozen=True)
@@ -25,52 +24,35 @@ INTENTS = {
     "factual_lookup": Intent(
         key="factual_lookup",
         label="Factual lookup",
-        instructions=(
-            "Give the specific fact first (the number, course, or policy) in one or two "
-            "sentences, quoting exact values from the sources. Do not add background."
-        ),
-        retrieval_limit=12,
+        instructions="Lead with the specific fact (the number, the course, the rule). Keep it short unless the student asks for more.",
+        retrieval_limit=15,
         temperature=0.0,
     ),
     "explanation": Intent(
         key="explanation",
         label="Explanation",
-        instructions=(
-            "Explain the topic in two or three short paragraphs for a student new to it. "
-            "Start with the main idea, then the details. Define catalog terms when the "
-            "sources define them."
-        ),
+        instructions="Explain it the way you would to a student new to the topic: the main idea first, then the details that matter, in a few short paragraphs.",
         retrieval_limit=15,
         temperature=0.2,
     ),
     "comparison": Intent(
         key="comparison",
         label="Comparison",
-        instructions=(
-            "Describe each option in turn using the same aspects (purpose, required courses, "
-            "prerequisites, credit hours) as far as the sources allow, then state the key "
-            "differences in one closing sentence. Say clearly if the sources only describe "
-            "one of the options."
-        ),
+        instructions="Go through each option on the same points as far as the sources allow, then sum up the key difference. If the sources only cover one side, say so.",
         retrieval_limit=15,
         temperature=0.2,
     ),
     "planning": Intent(
         key="planning",
         label="Planning",
-        instructions=(
-            "List the relevant requirements as a numbered list, note any prerequisites or "
-            "sequencing the sources state, and end with one sentence telling the student to "
-            "confirm the plan with their academic advisor. Do not assume which courses the "
-            "student has completed unless the question says so."
-        ),
+        instructions="Lay out the relevant requirements in a sensible order, as a short numbered list if that helps, note any sequencing the sources state, and remind the student to confirm plans with their academic advisor.",
         retrieval_limit=15,
         temperature=0.2,
     ),
     "general": Intent(
         key="general",
         label="General",
-        instructions="Answer in one short paragraph.",
+        instructions="Answer briefly and naturally.",
         retrieval_limit=15,
         temperature=0.2,
     ),
@@ -155,19 +137,24 @@ def classify(question):
     return Classification(DEFAULT_INTENT, "no rule matched, default", "")
 
 
-GROUNDING_RULES = f"""You are DegreeGuide, an assistant for Georgia Tech undergraduates. You answer questions about degree requirements, courses, prerequisites, and graduation progress.
+ASSISTANT_ROLE = """You are DegreeGuide, a friendly assistant for Georgia Tech undergraduates. You help with degree requirements, courses, threads, and academic policies.
 
-Grounding rules (these override everything else):
-1. Use ONLY the numbered sources provided in the user message. Do not use outside knowledge, even if you are confident.
-2. Some sources may be unrelated to the question. Ignore those and use only the ones that relate to it.
-3. If none of the sources relate to the question, reply with {NOT_IN_SOURCES} followed by one short sentence saying what the sources cover instead and what is missing, without answering from outside knowledge. If related sources answer only part of the question, share what they do say about it and state plainly what they do not cover.
-4. After each statement taken from a source, cite it with its number in square brackets, like [1] or [2]. Cite only numbers that exist.
-5. Never invent course numbers, credit counts, policies, or deadlines that are not written in the sources.
-6. Write plain text. No Markdown, no headings, no tables."""
+For each message you get passages retrieved from the catalog documents (the "sources"), the recent conversation, and what the student wrote. Talk to the student naturally, the way a knowledgeable advising assistant would.
+
+One rule is not negotiable: every fact you state about Georgia Tech (courses, credit hours, requirements, policies, dates) must come from the sources, and you mark it with the source's number in square brackets, like [1]. Never fill a gap from memory and never guess. State only what a source says outright. Many sources are tables flattened into text: do not infer a relationship, such as which course is a prerequisite of which, from how items happen to sit next to each other; if a source does not state it directly, say it is not stated. A citation means that source says it: never attach one to advice or a suggestion of your own, and do not name specific systems, offices, or websites unless a source names them.
+
+Within that rule, use your own judgment:
+- Answer what the student means, even when it is loosely worded. If they ask for any example, pick one from the sources.
+- Some sources will be unrelated to the message. Ignore them.
+- If the sources cover only part of it, share that part and be clear about what they do not say.
+- If the sources do not cover it, say so plainly in your own words. Mention anything related they do contain, or ask what the student is looking for.
+- If the message is ambiguous, ask a short clarifying question instead of guessing.
+- Cite the one or two sources that best support each fact, not every source that mentions it, and cite nothing for a sentence that only says the sources lack something.
+Reply in the language the student wrote in. Write plain text: no Markdown and no asterisks; use short paragraphs, or numbered lines for a list."""
 
 
 def system_prompt(intent):
-    return f"{GROUNDING_RULES}\n\nThis question is a {intent.label.lower()}. {intent.instructions}"
+    return f"{ASSISTANT_ROLE}\n\nStyle for this message (a {intent.label.lower()}): {intent.instructions}"
 
 
 def context_block(number, chunk, previous=None):
@@ -188,16 +175,22 @@ def context_block(number, chunk, previous=None):
     return f"{label}\n{chunk.text}"
 
 
-def build_messages(question, chunks, intent=DEFAULT_INTENT):
-    """Return OpenAI-style chat messages for a grounded answer of this intent."""
+def build_messages(question, chunks, intent=DEFAULT_INTENT, original=None, history=""):
+    """Return OpenAI-style chat messages for a grounded, conversational answer.
+
+    The model sees the recent conversation, the retrieved sources, the
+    student's own words (``original``) and how search read them
+    (``question``), so it answers the student, not the rewrite.
+    """
     context = "\n\n".join(
         context_block(i, chunk, chunks[i - 2] if i > 1 else None) for i, chunk in enumerate(chunks, 1)
-    )
+    ) or "(no passages were found for this message)"
+    original = original or question
+    understood = "" if original.strip().lower() == question.strip().lower() else f"\n(Search read this as: {question})"
     user = (
+        f"Recent conversation:\n{history or '(no earlier messages)'}\n\n"
         f"Sources:\n\n{context}\n\n"
-        f"Question: {question}\n\n"
-        f"Answer using only the sources above that relate to the question, citing them like [1]. "
-        f"If none of them relate to it, reply with {NOT_IN_SOURCES} and one sentence on what is missing."
+        f"Student's message: {original}{understood}"
     )
     return [
         {"role": "system", "content": system_prompt(intent)},

@@ -95,7 +95,8 @@ def prompt_preview(request):
         "standalone_question": planned.question,
         "documents_picked": [names.get(source_id, str(source_id)) for source_id in planned.document_ids],
         "search_terms": list(planned.search_terms),
-        "off_topic": planned.off_topic,
+        "needs_search": planned.search,
+        "direct_reply": planned.reply,
         "question_type": intent.label,
         "intent": intent.key,
         "type_chosen_by": "planner" if planned.intent_key else "keyword rules",
@@ -108,5 +109,5 @@ def prompt_preview(request):
             {"score": hit.score, "source": hit.chunk.source.name, "section": hit.chunk.section}
             for hit in hits
         ],
-        "messages": build_messages(planned.question, chunks, intent) if chunks else [],
+        "messages": build_messages(planned.question, chunks, intent, question) if planned.search else [],
     }, json_dumps_params={"indent": 2})
