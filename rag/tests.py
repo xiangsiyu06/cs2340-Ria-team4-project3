@@ -313,7 +313,7 @@ class PromptPreviewTests(KnowledgeBaseMixin, TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn("/admin/login/", response.url)
 
-    def test_shows_intent_rule_and_prompt_without_calling_the_model(self):
+    def test_shows_intent_rule_and_prompt_without_an_answer_call(self):
         staff = get_user_model().objects.create_user("staff", password="pw", is_staff=True)
         self.client.force_login(staff)
         with mock.patch("rag.llm.complete") as complete:
@@ -322,6 +322,7 @@ class PromptPreviewTests(KnowledgeBaseMixin, TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["intent"], "comparison")
+        self.assertEqual(data["type_chosen_by"], "keyword rules")
         self.assertEqual(data["question_type"], "Comparison")
         self.assertEqual(data["matched_text"], "Compare")
         self.assertEqual(data["retrieval_limit"], INTENTS["comparison"].retrieval_limit)
@@ -360,3 +361,35 @@ class ConversationTests(KnowledgeBaseMixin, TestCase):
         self.assertEqual(len(self.client.session["rag_history"]), 1)
         self.assertEqual(self.client.post(reverse("rag:reset")).status_code, 200)
         self.assertNotIn("rag_history", self.client.session)
+
+
+@mock.patch("rag.services.complete", return_value="CS 1332 covers data structures [1].")
+class PlannerQuestionTypeTests(KnowledgeBaseMixin, TestCase):
+    def plan_returns(self, question_type):
+        self.planner.side_effect = None
+        self.planner.return_value = json.dumps({
+            "standalone_question": "Tell me about CS 1332", "search_terms": ["CS 1332"],
+            "question_type": question_type, "small_talk": False,
+        })
+
+    def test_planner_type_overrides_keyword_rules(self, complete):
+        # The keyword rules would say factual_lookup because of the course code.
+        self.assertEqual(classify("Tell me about CS 1332").intent.key, "factual_lookup")
+        self.plan_returns("explanation")
+        result = answer("Tell me about CS 1332")
+        self.assertEqual(result.intent, "Explanation")
+        self.assertIn(INTENTS["explanation"].instructions, complete.call_args.args[0][0]["content"])
+        self.assertEqual(complete.call_args.kwargs["temperature"], INTENTS["explanation"].temperature)
+
+    def test_unknown_planner_type_falls_back_to_rules(self, complete):
+        self.plan_returns("creative_poem")
+        self.assertEqual(answer("Tell me about CS 1332").intent, "Factual lookup")
+
+    def test_preview_reports_who_chose_the_type(self, complete):
+        self.plan_returns("explanation")
+        staff = get_user_model().objects.create_user("staff2", password="pw", is_staff=True)
+        self.client.force_login(staff)
+        data = self.client.get(PREVIEW_URL, {"q": "Tell me about CS 1332"}).json()
+        self.assertEqual((data["intent"], data["type_chosen_by"], data["keyword_rules_would_pick"]),
+                         ("explanation", "planner", "factual_lookup"))
+        complete.assert_not_called()

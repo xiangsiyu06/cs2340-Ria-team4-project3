@@ -1,9 +1,11 @@
-"""US3: let the model plan retrieval before answering.
+"""US3/US8: let the model plan retrieval and pick the question type before answering.
 
 One cheap model call rewrites the student's message into a standalone
 question (resolving "it" or "that course" from the recent conversation) and
 picks search terms likely to appear in catalog text. Retrieval then runs on
-those terms. If the call fails, the original question is used unchanged.
+those terms. The same call labels the question type (US8), which decides
+the prompt instructions. If the call fails, the original question is used
+unchanged and the keyword rules in prompts.py pick the type.
 """
 
 import json
@@ -12,16 +14,23 @@ import re
 from dataclasses import dataclass
 
 from .llm import LLMUnavailable, complete
+from .prompts import INTENTS
 
 logger = logging.getLogger(__name__)
 
 PLANNER_PROMPT = """You plan catalog searches for DegreeGuide, a Georgia Tech degree-requirements assistant. You never answer questions yourself.
 
 Given the recent conversation and the student's new message, reply with JSON only, in this shape:
-{"standalone_question": "...", "search_terms": ["...", "..."], "small_talk": false}
+{"standalone_question": "...", "search_terms": ["...", "..."], "question_type": "...", "small_talk": false}
 
 - standalone_question: the new message rewritten so it makes sense on its own. Replace words like "it", "that", or "this course" with what they refer to in the conversation. Keep the student's meaning.
 - search_terms: 3 to 8 words or short phrases likely to appear in catalog text that answers the question. Include spelled-out forms (for example "Bachelor of Science" for BS) and course codes like "CS 2340".
+- question_type: exactly one of
+  "factual_lookup" (asks for a specific fact: a number, a course, whether something is required, a prerequisite),
+  "explanation" (asks what something is, how it works, or why; includes "tell me about X"),
+  "comparison" (weighs two or more options against each other, including "should I pick A or B"),
+  "planning" (asks what to take, in what order, what still counts or remains for the student),
+  "general" (anything else).
 - small_talk: true only for greetings, thanks, or chit-chat that needs no catalog information."""
 
 SMALL_TALK_TEXT = (
@@ -36,6 +45,7 @@ class Plan:
     search_text: str   # what retrieval searches for
     small_talk: bool = False
     planned: bool = False  # False when the model call failed and the original question is used
+    intent_key: str | None = None  # question type chosen by the model (US8); None means use the keyword rules
 
 
 def plan(question, history=()):
@@ -52,11 +62,13 @@ def plan(question, history=()):
         data = json.loads(re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip()))
         standalone = str(data.get("standalone_question") or question).strip()[:2000]
         terms = [str(term) for term in data.get("search_terms") or [] if str(term).strip()][:8]
+        intent_key = str(data.get("question_type") or "").strip()
         return Plan(
             question=standalone,
             search_text=" ".join([standalone, *terms]),
             small_talk=bool(data.get("small_talk")),
             planned=True,
+            intent_key=intent_key if intent_key in INTENTS else None,
         )
     except (LLMUnavailable, ValueError, TypeError, AttributeError) as exc:
         logger.warning("Planner unavailable, searching the original question: %s", exc)
