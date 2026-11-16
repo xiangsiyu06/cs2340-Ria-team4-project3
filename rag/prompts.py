@@ -29,7 +29,7 @@ INTENTS = {
             "Give the specific fact first (the number, course, or policy) in one or two "
             "sentences, quoting exact values from the sources. Do not add background."
         ),
-        retrieval_limit=4,
+        retrieval_limit=12,
         temperature=0.0,
     ),
     "explanation": Intent(
@@ -40,7 +40,7 @@ INTENTS = {
             "Start with the main idea, then the details. Define catalog terms when the "
             "sources define them."
         ),
-        retrieval_limit=6,
+        retrieval_limit=15,
         temperature=0.2,
     ),
     "comparison": Intent(
@@ -52,7 +52,7 @@ INTENTS = {
             "differences in one closing sentence. Say clearly if the sources only describe "
             "one of the options."
         ),
-        retrieval_limit=8,
+        retrieval_limit=15,
         temperature=0.2,
     ),
     "planning": Intent(
@@ -64,14 +64,14 @@ INTENTS = {
             "confirm the plan with their academic advisor. Do not assume which courses the "
             "student has completed unless the question says so."
         ),
-        retrieval_limit=8,
+        retrieval_limit=15,
         temperature=0.2,
     ),
     "general": Intent(
         key="general",
         label="General",
         instructions="Answer in one short paragraph.",
-        retrieval_limit=6,
+        retrieval_limit=15,
         temperature=0.2,
     ),
 }

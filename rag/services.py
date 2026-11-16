@@ -15,7 +15,7 @@ from .planner import SMALL_TALK_TEXT, plan
 
 THANKS_TEXT = "You're welcome! Ask me anything else about your degree requirements or courses."
 from .prompts import INTENTS, NOT_IN_SOURCES, build_messages, classify, comparison_sides
-from .retrieval import retrieve, with_neighbors
+from .retrieval import document_cards, query_terms, retrieve, retrieve_blended, with_neighbors
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +74,11 @@ def no_result(intent=None, question="", reason=""):
     topic = question if len(question) <= 120 else question[:117] + "..."
     names = list(dict.fromkeys(
         DataSource.objects.filter(is_active=True, status=DataSource.Status.READY).values_list("name", flat=True)
-    ))[:6]
-    covers = ", ".join(names) if names else "no sources yet"
+    ))
+    if len(names) > 6:
+        covers = f"{len(names)} documents, including {', '.join(names[:5])}"
+    else:
+        covers = ", ".join(names) if names else "no sources yet"
     reason = reason.strip() or "None of the passages I have answer it."
     if not reason.endswith((".", "!", "?")):
         reason += "."
@@ -132,21 +135,22 @@ def cited_chunks(text, chunks):
     return text, used
 
 
-def retrieve_for(question, intent, search_text=None):
-    """Retrieval strategy per intent (US8).
+def retrieve_for(question, intent, planned=None):
+    """Retrieval strategy per intent (US8), using the planner's document picks.
 
-    A comparison also searches for each named option on its own, so both sides
-    reach the model even when one is lexically rarer than the other.
+    The base ranking blends a search over everything with a search inside the
+    documents the planner chose. A comparison also searches for each named
+    option on its own, so both sides reach the model.
     """
-    hits = retrieve(search_text or question, limit=intent.retrieval_limit)
+    documents = planned.document_ids if planned else ()
+    terms = planned.search_terms if planned else ()
+    hits = retrieve_blended(question, documents=documents, search_terms=terms, limit=intent.retrieval_limit)
     if intent.key == "comparison":
-        for side in comparison_sides(question):
-            hits.extend(retrieve(side, limit=2))
-    best = {}
-    for hit in hits:
-        if hit.chunk.id not in best or hit.score > best[hit.chunk.id].score:
-            best[hit.chunk.id] = hit
-    return sorted(best.values(), key=lambda hit: hit.score, reverse=True)[: intent.retrieval_limit]
+        seen = {hit.chunk.id for hit in hits}
+        extra = [hit for side in comparison_sides(question) for hit in retrieve(side, limit=2) if hit.chunk.id not in seen]
+        extra = list({hit.chunk.id: hit for hit in extra}.values())
+        hits = hits[: max(0, intent.retrieval_limit - len(extra))] + extra
+    return hits
 
 
 def choose_intent(planned):
@@ -164,17 +168,20 @@ def answer(question, history=()) -> Answer:
     if GREETING.match(question):
         text = THANKS_TEXT if question.lower().startswith("thank") else SMALL_TALK_TEXT
         return Answer(text, [], "Small talk")
-    if not history and not retrieve(question, floor=0.0, limit=1):
-        # Shares no words with the knowledge base and isn't a follow-up:
-        # refuse without spending a model call.
+    if not history and query_terms(question) and not retrieve(question, floor=0.0, limit=1):
+        # English words, none of them in the knowledge base, and not a
+        # follow-up: refuse without spending a model call. (A question with no
+        # English words goes to the planner, which rewrites it in English.)
         logger.info("No overlap with the knowledge base: %r", question)
         return no_result(classify(question).intent.label, question, "None of its key words appear in the sources I have.")
-    planned = plan(question, history)
+    planned = plan(question, history, document_cards())
     if planned.small_talk:
         return Answer(SMALL_TALK_TEXT, [], "Small talk")
     question = planned.question
     intent = choose_intent(planned)
-    hits = retrieve_for(question, intent, planned.search_text)
+    if planned.off_topic and not planned.document_ids:
+        return no_result(intent.label, question, "That is outside what the catalog sources cover.")
+    hits = retrieve_for(question, intent, planned)
     if not hits:
         logger.info("No relevant chunks for %s question: %r", intent.key, question)
         return no_result(intent.label, question, "The closest passages weren't related enough to answer it.")

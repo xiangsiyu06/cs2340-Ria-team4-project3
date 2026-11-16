@@ -12,7 +12,7 @@ from django.views.decorators.http import require_GET, require_POST
 from .llm import LLMUnavailable
 from .planner import plan
 from .prompts import build_messages, classify
-from .retrieval import with_neighbors
+from .retrieval import document_cards, with_neighbors
 from .services import InvalidQuestion, answer, choose_intent, clean_question, retrieve_for
 
 logger = logging.getLogger(__name__)
@@ -83,15 +83,19 @@ def prompt_preview(request):
         question = clean_question(request.GET.get("q", ""))
     except InvalidQuestion as exc:
         return JsonResponse({"error": str(exc)}, status=400)
-    planned = plan(question)
+    cards = document_cards()
+    planned = plan(question, (), cards)
     rules = classify(planned.question)
     intent = choose_intent(planned)
-    hits = retrieve_for(planned.question, intent, planned.search_text)
+    hits = retrieve_for(planned.question, intent, planned)
+    names = {source_id: line.split(" - key terms:")[0] for _, source_id, line in cards}
     chunks = with_neighbors(hits)
     return JsonResponse({
         "question": question,
         "standalone_question": planned.question,
-        "search_text": planned.search_text,
+        "documents_picked": [names.get(source_id, str(source_id)) for source_id in planned.document_ids],
+        "search_terms": list(planned.search_terms),
+        "off_topic": planned.off_topic,
         "question_type": intent.label,
         "intent": intent.key,
         "type_chosen_by": "planner" if planned.intent_key else "keyword rules",

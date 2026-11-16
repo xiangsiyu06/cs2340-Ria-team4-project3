@@ -11,10 +11,10 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 
-from knowledge.models import Chunk
+from knowledge.models import Chunk, DataSource
 from knowledge.services import published_chunks, term_vector
 
-TOP_K = 6
+TOP_K = 12
 # A chunk this short is usually a heading or lead-in ("The following classes
 # count toward..."); the content it introduces is in the next chunk.
 SHORT_CHUNK_CHARS = 200
@@ -23,6 +23,15 @@ SHORT_CHUNK_CHARS = 200
 # only drops chunks that share almost none of the question's vocabulary.
 # Calibrated on catalog pages and degree-sheet PDFs; see the PR description.
 RELEVANCE_FLOOR = 0.12
+
+# How many candidates each search contributes before the two rankings are merged.
+CANDIDATES = 25
+# Words too common across this knowledge base to help when searching inside
+# the documents the planner picked.
+GENERIC = frozenset(
+    "georgia tech gt institute technology student university course degree "
+    "program requirement catalog information specific".split()
+)
 
 # BM25 constants (standard values).
 K1 = 1.5
@@ -200,3 +209,83 @@ def next_chunk(chunk):
         .filter(source=chunk.source, position=chunk.position + 1)
         .first()
     )
+
+
+def document_cards():
+    """One line per published document for the planner: (number, source id, text).
+
+    Each line gives the document's name, its file name, and its most
+    distinctive terms, so the model can pick documents even when a name is
+    vague. Numbers are positions in this list and only valid for one request.
+    """
+    terms_by_source = {}
+    for source_id, vector in published_chunks().values_list("source_id", "vector"):
+        terms_by_source.setdefault(source_id, Counter()).update(stemmed(vector))
+    document_frequency = Counter()
+    for terms in terms_by_source.values():
+        document_frequency.update(terms.keys())
+    total = len(terms_by_source)
+    cards = []
+    sources = DataSource.objects.filter(id__in=terms_by_source).order_by("id")
+    for number, source in enumerate(sources, 1):
+        terms = terms_by_source[source.id]
+        size = sum(terms.values()) or 1
+        distinctive = sorted(
+            terms, key=lambda t: -(terms[t] / size) * math.log(total / document_frequency[t]) if document_frequency[t] < total else 0,
+        )[:8]
+        label = source.name + (f" (file: {source.file_basename})" if source.file_basename else "")
+        cards.append((number, source.id, f"{number}. {label} - key terms: {', '.join(distinctive)}"))
+    return cards
+
+
+def search_inside(source_ids, text, limit=CANDIDATES):
+    """Chunk ids ranked by BM25 within the given documents only."""
+    corpus = [
+        (chunk_id, stemmed(vector))
+        for chunk_id, vector in published_chunks().filter(source_id__in=source_ids).values_list("id", "vector")
+    ]
+    terms = query_terms(text)
+    terms = {t for t in terms if t not in GENERIC} or terms
+    if not corpus or not terms:
+        return []
+    total = len(corpus)
+    document_frequency = Counter()
+    for _, vector in corpus:
+        document_frequency.update(vector.keys())
+    average_length = sum(sum(v.values()) for _, v in corpus) / total
+    known = [t for t in terms if document_frequency[t]]
+    idf = {t: math.log(1 + (total - document_frequency[t] + 0.5) / (document_frequency[t] + 0.5)) for t in known}
+    scored = []
+    for chunk_id, vector in corpus:
+        length_norm = K1 * (1 - B + B * sum(vector.values()) / average_length)
+        score = 0.0
+        for term in known:
+            tf = vector.get(term)
+            if tf:
+                score += idf[term] * (K1 + 1) if COURSE_CODE.match(term) else idf[term] * tf * (K1 + 1) / (tf + length_norm)
+        if score > 0:
+            scored.append((-score, chunk_id))
+    scored.sort()
+    return [chunk_id for _, chunk_id in scored[:limit]]
+
+
+def retrieve_blended(question, *, documents=(), search_terms=(), limit=TOP_K):
+    """Merge two rankings: the whole knowledge base, and the planner's documents.
+
+    Searching everything with the question alone is strong for specific
+    questions. Searching inside the documents the planner picked is strong
+    for broad ones ("what are the CS degree requirements"). Reciprocal rank
+    fusion merges the two lists, so a chunk ranked high in either reaches the
+    model. With no documents picked this is plain ``retrieve``.
+    """
+    everywhere = retrieve(question, limit=CANDIDATES)
+    if not documents:
+        return everywhere[:limit]
+    inside = search_inside(documents, " ".join([question, *search_terms]))
+    fused = Counter()
+    for ranking in ([hit.chunk.id for hit in everywhere], inside):
+        for rank, chunk_id in enumerate(ranking, 1):
+            fused[chunk_id] += 1 / (60 + rank)
+    top = [chunk_id for chunk_id, _ in sorted(fused.items(), key=lambda item: (-item[1], item[0]))[:limit]]
+    chunks = Chunk.objects.select_related("source").in_bulk(top)
+    return [Hit(chunks[cid], round(fused[cid], 4)) for cid in top if cid in chunks]
