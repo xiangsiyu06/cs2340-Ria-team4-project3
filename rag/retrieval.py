@@ -18,8 +18,8 @@ TOP_K = 12
 # A chunk this short is usually a heading or lead-in ("The following classes
 # count toward..."); the content it introduces is in the next chunk.
 SHORT_CHUNK_CHARS = 200
-# Retrieval casts a wide net and the model judges relevance (it must reply
-# NOT_IN_SOURCES when nothing it is shown relates to the question). The floor
+# Retrieval casts a wide net and the model judges relevance (it is told to
+# ignore unrelated passages and to say so when none answer). The floor
 # only drops chunks that share almost none of the question's vocabulary.
 # Calibrated on catalog pages and degree-sheet PDFs; see the PR description.
 RELEVANCE_FLOOR = 0.12
@@ -50,6 +50,9 @@ STOPWORDS = frozenset(
     tell explain please need want know
     difference different between versus vs compare comparison
     work works like mean means get take many much find help about
+    ask asking asked example examples provide give show list name pick
+    random something anything thing stuff kind sort one ones
+    georgia tech gt institute specific
     """.split()
 )
 
@@ -62,6 +65,9 @@ ABBREVIATIONS = {
     "cs": ("computer", "science"),
     "math": ("mathematic",),
     "prereq": ("prerequisite",),
+    "preq": ("prerequisite",),
+    "req": ("requirement",),
+    "hr": ("hour",),
     "coreq": ("corequisite",),
 }
 
@@ -270,20 +276,30 @@ def search_inside(source_ids, text, limit=CANDIDATES):
 
 
 def retrieve_blended(question, *, documents=(), search_terms=(), limit=TOP_K):
-    """Merge two rankings: the whole knowledge base, and the planner's documents.
+    """Merge up to three rankings into one list for the model.
 
-    Searching everything with the question alone is strong for specific
-    questions. Searching inside the documents the planner picked is strong
-    for broad ones ("what are the CS degree requirements"). Reciprocal rank
-    fusion merges the two lists, so a chunk ranked high in either reaches the
-    model. With no documents picked this is plain ``retrieve``.
+    1. The whole knowledge base searched with the question: strong for
+       specific questions.
+    2. The documents the planner picked: strong for broad questions ("what
+       are the CS degree requirements").
+    3. The whole knowledge base searched with only the planner's terms:
+       strong for open-ended requests ("any class and its prerequisite"),
+       where the question is mostly filler around one topical word.
+    Reciprocal rank fusion merges them, so a chunk ranked well in more than
+    one list, or very high in any, reaches the model. With no plan this is
+    plain ``retrieve``.
     """
     everywhere = retrieve(question, limit=CANDIDATES)
-    if not documents:
+    if not documents and not search_terms:
         return everywhere[:limit]
-    inside = search_inside(documents, " ".join([question, *search_terms]))
+    rankings = [[hit.chunk.id for hit in everywhere]]
+    if documents:
+        rankings.append(search_inside(documents, " ".join([question, *search_terms])))
+    if search_terms:
+        # The planner's terms alone: the topic without the filler words of the question.
+        rankings.append([hit.chunk.id for hit in retrieve(" ".join(search_terms), limit=CANDIDATES)])
     fused = Counter()
-    for ranking in ([hit.chunk.id for hit in everywhere], inside):
+    for ranking in rankings:
         for rank, chunk_id in enumerate(ranking, 1):
             fused[chunk_id] += 1 / (60 + rank)
     top = [chunk_id for chunk_id, _ in sorted(fused.items(), key=lambda item: (-item[1], item[0]))[:limit]]
