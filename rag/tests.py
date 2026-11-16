@@ -10,7 +10,8 @@ from knowledge.services import term_vector
 
 from .llm import LLMUnavailable
 from .prompts import INTENTS, NOT_IN_SOURCES, build_messages, classify, comparison_sides
-from .retrieval import RELEVANCE_FLOOR, query_terms, retrieve, with_neighbors
+from .planner import plan
+from .retrieval import RELEVANCE_FLOOR, document_cards, query_terms, retrieve, retrieve_blended, with_neighbors
 from .services import NO_RESULT_TEXT, InvalidQuestion, answer, cited_chunks, retrieve_for
 
 ASK_URL = reverse("rag:ask")
@@ -242,10 +243,11 @@ class AnswerServiceTests(KnowledgeBaseMixin, TestCase):
 
     def test_intent_controls_prompt_retrieval_and_temperature(self, complete):
         complete.return_value = "Answer [1]."
-        with mock.patch("rag.services.retrieve", wraps=__import__("rag.services", fromlist=["retrieve"]).retrieve) as retrieve_spy:
+        from rag import services
+        with mock.patch("rag.services.retrieve_blended", wraps=services.retrieve_blended) as blended:
             result = answer("Compare the Threads with CS 1332")
         self.assertEqual(result.intent, "Comparison")
-        self.assertEqual(retrieve_spy.call_args.kwargs["limit"], INTENTS["comparison"].retrieval_limit)
+        self.assertEqual(blended.call_args.kwargs["limit"], INTENTS["comparison"].retrieval_limit)
         messages, kwargs = complete.call_args.args[0], complete.call_args.kwargs
         self.assertIn(INTENTS["comparison"].instructions, messages[0]["content"])
         self.assertEqual(kwargs["temperature"], INTENTS["comparison"].temperature)
@@ -393,3 +395,67 @@ class PlannerQuestionTypeTests(KnowledgeBaseMixin, TestCase):
         self.assertEqual((data["intent"], data["type_chosen_by"], data["keyword_rules_would_pick"]),
                          ("explanation", "planner", "factual_lookup"))
         complete.assert_not_called()
+
+
+class DocumentRoutingTests(KnowledgeBaseMixin, TestCase):
+    def test_cards_number_published_documents_with_key_terms(self):
+        cards = document_cards()
+        self.assertEqual([number for number, _, _ in cards], [1, 2])
+        self.assertEqual({source_id for _, source_id, _ in cards}, {self.cs.id, self.math.id})
+        self.assertTrue(cards[0][2].startswith("1. BS Computer Science - key terms: "))
+        self.assertNotIn("Old CS page", " ".join(line for _, _, line in cards))
+
+    def test_blend_brings_in_the_picked_document(self):
+        # Searching everything favors the threads chunk; the picked document's passage must still get in.
+        question = "Threads in the degree"
+        self.assertEqual([hit.chunk for hit in retrieve(question, limit=1)], [self.threads])
+        hits = retrieve_blended(question, documents=[self.math.id], search_terms=["minimum GPA", "linear algebra"], limit=2)
+        self.assertEqual({hit.chunk for hit in hits}, {self.threads, self.gpa})
+
+    def test_blend_without_documents_is_the_plain_search(self):
+        question = "How do threads work in the computer science degree?"
+        self.assertEqual([h.chunk for h in retrieve_blended(question, limit=2)], [h.chunk for h in retrieve(question, limit=2)])
+
+    def test_planner_maps_document_numbers_to_sources(self):
+        self.planner.side_effect = None
+        self.planner.return_value = json.dumps({
+            "standalone_question": "What is the minimum GPA to graduate in Mathematics?", "documents": [2, 9, "x", 2],
+            "search_terms": ["minimum GPA"], "question_type": "factual_lookup", "small_talk": False, "off_topic": False,
+        })
+        planned = plan("min gpa for math?", (), document_cards())
+        self.assertEqual(planned.document_ids, (self.math.id,))
+        self.assertEqual(planned.search_terms, ("minimum GPA",))
+        self.assertIn("2. BS Mathematics", self.planner.call_args.args[0][1]["content"])
+
+    @mock.patch("rag.services.complete", return_value="The minimum GPA is 2.0 [1].")
+    def test_answer_uses_the_planners_documents(self, complete):
+        self.planner.side_effect = None
+        self.planner.return_value = json.dumps({
+            "standalone_question": "What are the graduation rules for the Mathematics degree?", "documents": [2],
+            "search_terms": ["minimum GPA"], "question_type": "factual_lookup", "small_talk": False, "off_topic": False,
+        })
+        result = answer("what are the graduation rules for math")
+        self.assertEqual(result.sources[0].title, "BS Mathematics: Graduation")
+
+    @mock.patch("rag.services.complete")
+    def test_off_topic_is_refused_without_an_answer_call(self, complete):
+        self.planner.side_effect = None
+        self.planner.return_value = json.dumps({
+            "standalone_question": "Which science museum is best?", "documents": [],
+            "search_terms": [], "question_type": "general", "small_talk": False, "off_topic": True,
+        })
+        result = answer("which science museum is best")
+        self.assertTrue(result.text.startswith(NO_RESULT_TEXT))
+        self.assertIn("outside what the catalog sources cover", result.text)
+        complete.assert_not_called()
+
+    @mock.patch("rag.services.complete", return_value="CS 1332 is 3 credit hours [1].")
+    def test_question_without_english_words_reaches_the_planner(self, complete):
+        self.planner.side_effect = None
+        self.planner.return_value = json.dumps({
+            "standalone_question": "How many credit hours is CS 1332?", "documents": [1],
+            "search_terms": ["CS 1332", "credit hours"], "question_type": "factual_lookup", "small_talk": False, "off_topic": False,
+        })
+        result = answer("数据结构这门课多少学分")
+        self.assertEqual(result.intent, "Factual lookup")
+        self.assertEqual(result.sources[0].title, "BS Computer Science: Courses")
