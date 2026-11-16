@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import socket
+import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -23,6 +24,7 @@ MAX_OUTPUT_TOKENS = 1024
 # The chat UI gives up after 60 s, so two attempts must finish well inside that.
 ATTEMPT_TIMEOUT_SECONDS = 22
 RETRY_STATUSES = {429, 500, 502, 503, 504}
+RATE_LIMIT_WAIT_SECONDS = 6
 
 
 class LLMUnavailable(RuntimeError):
@@ -78,6 +80,8 @@ def complete(messages, *, temperature=0.1, attempts=2, timeout=ATTEMPT_TIMEOUT_S
             last_error = f"HTTP {exc.code} from {settings['model']}: {detail[:300]}"
             if exc.code not in RETRY_STATUSES:
                 break
+            if exc.code == 429 and attempt < attempts:
+                time.sleep(RATE_LIMIT_WAIT_SECONDS)  # free tier allows 15 requests a minute
         except (URLError, socket.timeout, TimeoutError, OSError, ValueError) as exc:
             last_error = f"{type(exc).__name__}: {exc}"
         logger.warning("LLM attempt %s failed: %s", attempt, last_error)
