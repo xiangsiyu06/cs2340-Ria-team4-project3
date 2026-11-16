@@ -9,7 +9,7 @@ from knowledge.models import Chunk, DataSource
 from knowledge.services import term_vector
 
 from .llm import LLMUnavailable
-from .prompts import INTENTS, NOT_IN_SOURCES, build_messages, classify, comparison_sides
+from .prompts import ASSISTANT_ROLE, INTENTS, build_messages, classify, comparison_sides
 from .planner import plan
 from .retrieval import RELEVANCE_FLOOR, document_cards, query_terms, retrieve, retrieve_blended, with_neighbors
 from .services import NO_RESULT_TEXT, InvalidQuestion, answer, cited_chunks, retrieve_for
@@ -181,20 +181,20 @@ class ClassifierTests(TestCase):
         for intent in INTENTS.values():
             system = build_messages("q", [], intent)[0]["content"]
             self.assertIn(intent.instructions, system)
-            self.assertIn(NOT_IN_SOURCES, system)
+            self.assertIn(ASSISTANT_ROLE, system)
 
 
 class PromptTests(KnowledgeBaseMixin, TestCase):
     def test_messages_number_sources_and_require_grounding(self):
         messages = build_messages("What is CS 1332?", [self.threads, self.course])
         self.assertEqual([m["role"] for m in messages], ["system", "user"])
-        self.assertIn(NOT_IN_SOURCES, messages[0]["content"])
-        self.assertIn("Some sources may be unrelated to the question. Ignore those", messages[0]["content"])
+        self.assertIn("must come from the sources", messages[0]["content"])
+        self.assertIn("Never fill a gap from memory and never guess", messages[0]["content"])
         user = messages[1]["content"]
         self.assertIn("[1] BS Computer Science (Computer Science, 2026-2027) - section: Threads", user)
         self.assertIn("[2] BS Computer Science", user)
         self.assertIn(COURSE_TEXT, user)
-        self.assertTrue(user.rstrip().endswith(f"reply with {NOT_IN_SOURCES} and one sentence on what is missing."))
+        self.assertTrue(user.rstrip().endswith("Student's message: What is CS 1332?"))
 
 
 @mock.patch("rag.services.complete")
@@ -205,12 +205,11 @@ class AnswerServiceTests(KnowledgeBaseMixin, TestCase):
         self.assertEqual(result.sources, [])
         complete.assert_not_called()
 
-    def test_model_can_decline_when_sources_do_not_answer(self, complete):
-        complete.return_value = NOT_IN_SOURCES
+    def test_model_words_its_own_reply_when_sources_do_not_answer(self, complete):
+        complete.return_value = "The sources describe CS 1332 but say nothing about its grading policy."
         result = answer("What is the CS 1332 grading policy?")
-        self.assertTrue(result.text.startswith(NO_RESULT_TEXT))
+        self.assertEqual(result.text, "The sources describe CS 1332 but say nothing about its grading policy.")
         self.assertEqual(result.sources, [])
-
     def test_sources_are_the_cited_chunks_in_order(self, complete):
         complete.return_value = "Two Threads make a degree [2]. CS 1332 is 3 credits [1] [2]. Unknown [7]."
         result = answer("Threads and CS 1332")
@@ -226,14 +225,22 @@ class AnswerServiceTests(KnowledgeBaseMixin, TestCase):
     def test_grouped_citations_are_renumbered_and_shown(self, complete):
         chunks = ["A", "B", "C", "D", "E"]
         text, used = cited_chunks("Threads [4, 5]. Credits [2;4] and [9, 3]. Bad [7, 8].", chunks)
-        self.assertEqual(text, "Threads [1, 2]. Credits [3, 1] and [4]. Bad.")
+        self.assertEqual(text, "Threads [1, 2]. Credits [1, 3] and [4]. Bad.")
         self.assertEqual(used, ["D", "E", "B", "C"])
 
-    def test_uncited_answer_falls_back_to_best_chunk(self, complete):
-        complete.return_value = "CS 1332 covers data structures."
-        result = answer("What is CS 1332?")
-        self.assertEqual([s.title for s in result.sources], ["BS Computer Science: Courses"])
+    def test_student_sees_at_most_four_sources_and_one_per_page(self, complete):
+        text, used = cited_chunks("All threads need it [1, 2, 3, 4, 5, 6]. Also [6].", ["A", "B", "C", "D", "E", "F"])
+        self.assertEqual(text, "All threads need it [1, 2, 3, 4]. Also.")
+        self.assertEqual(used, ["A", "B", "C", "D"])
+        same_page = make_chunk(self.cs, 5, "More about CS 1332 on the same page.", section="Courses")
+        self.course.page_number = same_page.page_number = 3
+        text, used = cited_chunks("It is 3 credit hours [1] [2].", [self.course, same_page])
+        self.assertEqual((text, used), ("It is 3 credit hours [1] [1].", [self.course]))
 
+    def test_reply_without_citations_shows_no_sources(self, complete):
+        complete.return_value = "Which course do you mean?"
+        result = answer("What is CS 1332?")
+        self.assertEqual(result.sources, [])
     def test_as_dict_matches_chat_api_contract(self, complete):
         complete.return_value = "Answer [1]."
         data = answer("What is CS 1332?").as_dict()
@@ -342,22 +349,25 @@ class ConversationTests(KnowledgeBaseMixin, TestCase):
     def test_follow_up_is_rewritten_with_history(self, complete):
         self.ask("What is CS 1332?")
         self.planner.side_effect = None
-        self.planner.return_value = '```json\n{"standalone_question": "How many credits is CS 1332?", "search_terms": ["CS 1332", "credit hours"], "small_talk": false}\n```'
+        self.planner.return_value = '```json\n{"standalone_question": "How many credits is CS 1332?", "search_terms": ["CS 1332", "credit hours"], "search": true}\n```'
         data = self.ask("how many credits is it?")
         self.assertEqual(data["sources"][0]["title"], "BS Computer Science: Courses")
         planner_input = self.planner.call_args.args[0][1]["content"]
         self.assertIn("Student: What is CS 1332?", planner_input)
         self.assertIn("New message: how many credits is it?", planner_input)
-        self.assertIn("Question: How many credits is CS 1332?", complete.call_args.args[0][1]["content"])
+        sent = complete.call_args.args[0][1]["content"]
+        self.assertIn("Student's message: how many credits is it?", sent)
+        self.assertIn("(Search read this as: How many credits is CS 1332?)", sent)
+        self.assertIn("Student: What is CS 1332?", sent)
 
-    def test_small_talk_needs_no_retrieval(self, complete):
+    def test_model_replies_directly_when_no_search_is_needed(self, complete):
         self.planner.side_effect = None
-        self.planner.return_value = '{"standalone_question": "hi", "search_terms": [], "small_talk": true}'
+        self.planner.return_value = '{"search": false, "reply": "Hi! I can help with degree requirements and courses. What would you like to know?"}'
         data = self.ask("hi there")
-        self.assertEqual(data["question_type"], "Small talk")
+        self.assertEqual(data["question_type"], "Conversation")
+        self.assertEqual(data["answer"], "Hi! I can help with degree requirements and courses. What would you like to know?")
         self.assertEqual(data["sources"], [])
         complete.assert_not_called()
-
     def test_reset_forgets_history(self, complete):
         self.ask("What is CS 1332?")
         self.assertEqual(len(self.client.session["rag_history"]), 1)
@@ -371,7 +381,7 @@ class PlannerQuestionTypeTests(KnowledgeBaseMixin, TestCase):
         self.planner.side_effect = None
         self.planner.return_value = json.dumps({
             "standalone_question": "Tell me about CS 1332", "search_terms": ["CS 1332"],
-            "question_type": question_type, "small_talk": False,
+            "question_type": question_type, "search": True,
         })
 
     def test_planner_type_overrides_keyword_rules(self, complete):
@@ -420,7 +430,7 @@ class DocumentRoutingTests(KnowledgeBaseMixin, TestCase):
         self.planner.side_effect = None
         self.planner.return_value = json.dumps({
             "standalone_question": "What is the minimum GPA to graduate in Mathematics?", "documents": [2, 9, "x", 2],
-            "search_terms": ["minimum GPA"], "question_type": "factual_lookup", "small_talk": False, "off_topic": False,
+            "search_terms": ["minimum GPA"], "question_type": "factual_lookup", "search": True,
         })
         planned = plan("min gpa for math?", (), document_cards())
         self.assertEqual(planned.document_ids, (self.math.id,))
@@ -432,30 +442,64 @@ class DocumentRoutingTests(KnowledgeBaseMixin, TestCase):
         self.planner.side_effect = None
         self.planner.return_value = json.dumps({
             "standalone_question": "What are the graduation rules for the Mathematics degree?", "documents": [2],
-            "search_terms": ["minimum GPA"], "question_type": "factual_lookup", "small_talk": False, "off_topic": False,
+            "search_terms": ["minimum GPA"], "question_type": "factual_lookup", "search": True,
         })
         result = answer("what are the graduation rules for math")
         self.assertEqual(result.sources[0].title, "BS Mathematics: Graduation")
 
     @mock.patch("rag.services.complete")
-    def test_off_topic_is_refused_without_an_answer_call(self, complete):
+    def test_unrelated_request_gets_the_models_own_reply_and_no_sources(self, complete):
         self.planner.side_effect = None
-        self.planner.return_value = json.dumps({
-            "standalone_question": "Which science museum is best?", "documents": [],
-            "search_terms": [], "question_type": "general", "small_talk": False, "off_topic": True,
-        })
+        self.planner.return_value = json.dumps({"search": False, "reply": "That's outside what I can help with. I can answer questions about Georgia Tech degrees and courses."})
         result = answer("which science museum is best")
-        self.assertTrue(result.text.startswith(NO_RESULT_TEXT))
-        self.assertIn("outside what the catalog sources cover", result.text)
+        self.assertIn("outside what I can help with", result.text)
+        self.assertEqual(result.sources, [])
         complete.assert_not_called()
-
     @mock.patch("rag.services.complete", return_value="CS 1332 is 3 credit hours [1].")
     def test_question_without_english_words_reaches_the_planner(self, complete):
         self.planner.side_effect = None
         self.planner.return_value = json.dumps({
             "standalone_question": "How many credit hours is CS 1332?", "documents": [1],
-            "search_terms": ["CS 1332", "credit hours"], "question_type": "factual_lookup", "small_talk": False, "off_topic": False,
+            "search_terms": ["CS 1332", "credit hours"], "question_type": "factual_lookup", "search": True,
         })
         result = answer("数据结构这门课多少学分")
         self.assertEqual(result.intent, "Factual lookup")
         self.assertEqual(result.sources[0].title, "BS Computer Science: Courses")
+
+
+class StudentIntentTests(KnowledgeBaseMixin, TestCase):
+    """A rewrite that drifts in meaning must not change what gets answered."""
+
+    def drifted_plan(self):
+        self.planner.side_effect = None
+        self.planner.return_value = json.dumps({
+            "standalone_question": "How can I find the credit hours for a course?", "documents": [1],
+            "search_terms": ["credit hours"], "question_type": "factual_lookup", "search": True,
+        })
+
+    def test_prompt_carries_the_students_own_words(self):
+        user = build_messages("How can I find credit hours?", [self.course], original="any class and its credits, you pick")[1]["content"]
+        self.assertIn("Student's message: any class and its credits, you pick", user)
+        self.assertIn("(Search read this as: How can I find credit hours?)", user)
+        self.assertNotIn("Search read this as", build_messages("What is CS 1332?", [self.course], original="What is CS 1332?")[1]["content"])
+
+    @mock.patch("rag.services.complete", return_value="For example, CS 1332 is 3 credit hours [1].")
+    def test_model_and_search_get_the_original_message(self, complete):
+        self.drifted_plan()
+        result = answer("tell me the credits of CS 1332 or any class you like")
+        sent = complete.call_args.args[0][1]["content"]
+        self.assertIn("Student's message: tell me the credits of CS 1332 or any class you like", sent)
+        self.assertIn(COURSE_TEXT, sent)
+        self.assertEqual(result.sources[0].title, "BS Computer Science: Courses")
+
+    @mock.patch("rag.services.complete", return_value="I can't find that in the catalog documents. Which course are you asking about?")
+    def test_no_answer_reply_is_the_models_own_words(self, complete):
+        self.drifted_plan()
+        result = answer("tell me the credits of CS 1332 or any class you like")
+        self.assertEqual(result.text, "I can't find that in the catalog documents. Which course are you asking about?")
+        self.assertEqual(result.sources, [])
+    def test_planner_is_told_to_keep_the_kind_of_request(self):
+        from .planner import PLANNER_PROMPT
+        self.assertIn("Keep what they are asking for unchanged", PLANNER_PROMPT)
+        self.assertIn("preq", query_terms("preq for a class") | {"preq"})
+        self.assertIn("prerequisite", query_terms("preq for a class"))

@@ -63,7 +63,7 @@ class ConnectedChatTests(TestCase):
         result = self.ask("How do I bake sourdough bread?").json()
         self.assertTrue(result["answer"].startswith(NO_RESULT_TEXT))
         self.assertEqual(result["sources"], [])
-        provider.assert_not_called()
+        self.assertEqual(provider.call_count, 1)  # only the planning step ran; no answer was generated
 
     @patch.dict("os.environ", {"LLM_API_KEY": ""})
     def test_missing_key_produces_recoverable_service_error(self):
@@ -77,7 +77,7 @@ class ConnectedChatTests(TestCase):
         self.source.is_active = False
         self.source.save(update_fields=["is_active"])
         self.assertEqual(self.ask("What is CS 1332?").json()["sources"], [])
-        provider.assert_not_called()
+        self.assertEqual(provider.call_count, 1)  # only the planning step ran; the inactive document reached no answer
 
     def test_knowledge_pages_share_navigation_and_keep_staff_access(self):
         response = self.client.get(reverse("knowledge:source_list"))
