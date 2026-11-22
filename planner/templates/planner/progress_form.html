@@ -1,0 +1,24 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block title %}Degree progress · DegreeGuide{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'planner/planner.css' %}">{% endblock %}
+{% block breadcrumb %}Degree progress{% endblock %}
+{% block chat_current %}{% endblock %}
+{% block content %}
+<div class="planner-page">
+  <span class="eyebrow">DEGREE PROGRESS</span>
+  <h1>Am I on track to graduate?</h1>
+  <p class="planner-lead">Choose your degree and list the courses you've completed. DegreeGuide checks them against the requirements in the official catalog and shows what's left.</p>
+
+  {% if form.programs %}
+  <form class="card planner-form" method="get" action="{% url 'planner:progress_results' %}">
+    {{ form }}
+    <button class="button button-primary" type="submit">Check my progress</button>
+  </form>
+  {% else %}
+  <div class="card"><p class="planner-empty">No degree requirements have been loaded yet, so progress can't be checked. Please check back later.</p></div>
+  {% endif %}
+
+  <p class="planner-note">A planning aid based on the official catalog. Confirm with your academic advisor.</p>
+</div>
+{% endblock %}

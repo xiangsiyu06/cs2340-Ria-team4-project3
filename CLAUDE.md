@@ -50,6 +50,16 @@ Acceptance criteria for each story are written by the Product Owner (Siyu) and t
 | Yuhang Jiang | Full-stack | US3, US8 | US9 |
 | Bingchang Wu | Front-end | US2, US4 | C2 |
 
+## Sprint 2 ownership
+
+| Member | Sprint 2 work |
+|--------|---------------|
+| Siyu Xiang | C1 degree progress check, plus the requirement matching logic shared with C2 (`planner/services.py`) |
+| Bingchang Wu | C2 switching-major comparison; reuses Siyu's matching logic |
+| Yuhang Jiang | US9 answer-accuracy tests; regression tests |
+| Yinuo Chen | US10 performance monitoring, US12 usage logs; deployment |
+| Yongyi Zhang | US11 clear/reload the knowledge base; add data for a second major |
+
 ## Apps
 
 | App | URL prefix | Purpose / stories | Owner(s) |
@@ -142,6 +152,73 @@ Staff only (`staff_member_required`); users log in at `/admin/login/`. URL names
 Templates in `knowledge/templates/knowledge/` extend `knowledge/layout.html`. That is a temporary standalone layout; switch to `base.html` once it exists.
 
 Uploads are stored in `MEDIA_ROOT` (`BASE_DIR/media`, git-ignored). Django serves `/media/` only when `DEBUG=True`, so production needs its own `/media/` mapping, which is part of deployment (Yinuo).
+
+## Degree requirements & matching contract (C1/C2)
+
+Owner: Siyu (C1). Code: `planner/models.py`, `planner/services.py` (`match_requirements`), `planner/courses.py`, `planner/extraction.py`.
+
+**C2 must call `match_requirements`. Do not write a second matching function or another requirements model.** To change the models or the function's return shape, agree with Siyu first.
+
+### Models
+
+| Model | Field | Notes |
+|-------|-------|-------|
+| `DegreeProgram` | `major`, `catalog_year` | Same values as the `DataSource` it came from. |
+| | `thread` | Thread or concentration; blank when there is none. Each GT thread pair has its own complete catalog page, so a program with a thread holds that page's full requirements. Unique together with `major` and `catalog_year`. |
+| `RequirementGroup` | `program` | FK to `DegreeProgram`, `related_name='groups'`. |
+| | `name` | e.g. "Major Requirements", "Ethics: select one". |
+| | `rule` | `RequirementGroup.Rule`: `all` (every listed course), `choose` (`required_count` of the listed courses), `credits` (at least `credit_hours` from the listed courses). |
+| | `required_count` | `choose` only. |
+| | `credit_hours` | What the requirement is worth in the catalog; required for `credits`, where it is the minimum. |
+| | `position` | Order on the source page. |
+| | `source` | FK to `knowledge.DataSource`, `on_delete=CASCADE`. |
+| | `source_url`, `page_number` | Exact catalog section, or PDF page. Use the `citation_url` property for the link. Requirements point at the source, not at a `Chunk`, because re-ingesting replaces chunks. |
+| `RequirementCourse` | `group`, `code`, `credits` | `code` is normalized ("CS 1331"); `credits` may be null except in a `credits` rule. |
+
+`DegreeProgram.objects.available()` lists programs a student can check. `program.requirement_groups()` returns the groups used for matching: only from active sources, in catalog order.
+
+### `match_requirements(program, completed_courses) -> DegreeProgress`
+
+In `planner/services.py`. Reads the database, never writes, and does not use requests or views.
+
+- `program`: a `DegreeProgram`.
+- `completed_courses`: one string ("cs1331, CS-1332\nMATH 1551") or a list of strings, in any common format. Pieces that are not course codes are returned in `unrecognized`; nothing is raised.
+
+`DegreeProgress` (frozen dataclass):
+
+| Field / property | Meaning |
+|------------------|---------|
+| `program` | The `DegreeProgram` checked. |
+| `requirements` | Tuple of `RequirementStatus`, catalog order. |
+| `satisfied`, `still_needed` | The two columns. |
+| `satisfied_count`, `total_count`, `is_complete` | Summary. |
+| `credits_earned`, `credits_required` | Credit progress across the listed requirements; `None` when some requirement has no credit data. |
+| `completed_courses` | Normalized codes, in the order entered. |
+| `unrecognized` | Input pieces that are not course codes. |
+| `unused_courses` | Valid codes that count toward no requirement. |
+
+`RequirementStatus`: `group_id`, `name`, `rule`, `summary` ("Choose 1 of 6 courses"), `satisfied`, `unit` ("course" or "credit hour"), `required`, `completed`, `remaining`, `used_courses`, `options` (listed courses not taken yet; for `all`, exactly what is missing), `credits_required`, `credits_earned`, `source` (`SourceRef`: `name`, `url`, `page`).
+
+Matching rules: a course counts toward one requirement, except that a course several `all` requirements name satisfies each of them. `all` requirements claim courses first, then `choose`, then `credits`, in catalog order within each rule, so the result does not depend on the order the courses were typed. Use `planner.courses.normalize_course_code` / `read_courses` for course input; don't write another parser.
+
+### Extracting requirements
+
+```bash
+python manage.py extract_requirements                # list data sources and their ids
+python manage.py extract_requirements 3              # extract source 3
+python manage.py extract_requirements 3 --thread "Media & People"   # name the thread yourself
+```
+
+The source must be imported (`ready`). The command sends the source's chunks to the LLM (`rag.llm.complete`, so `LLM_API_KEY` must be set) a few at a time, checks the JSON reply, and only then replaces that source's earlier requirements in one transaction. If anything fails, earlier results are kept. The thread defaults to the "Thread: ..." part of the catalog heading. Requirements without specific courses (free electives, "any humanities") are skipped and listed in the output. Check and correct the results in the Django admin (Planner > Requirement groups). Re-run the command after re-ingesting a source.
+
+### C1 pages
+
+Public (the site has no student accounts). GET only; nothing is stored.
+
+| URL | Name | Notes |
+|-----|------|-------|
+| `/planner/` | `planner:progress` | Form. Query parameters from "Edit courses" refill it. |
+| `/planner/results/` | `planner:progress_results` | `?major=&catalog_year=&thread=&courses=`. Invalid input shows the form again with errors. |
 
 ## Rules for working in this repo
 
