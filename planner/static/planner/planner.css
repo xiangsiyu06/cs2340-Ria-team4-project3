@@ -1,0 +1,44 @@
+/* C1 degree progress pages. Uses the shared tokens and components in frontend/styles.css. */
+.planner-page { max-width: 1120px; margin: auto; padding: 28px 39px 40px; overflow-wrap: break-word; }
+.planner-page h1 { font: 34px/1.2 var(--font-display); font-weight: 400; margin: 10px 0 6px; }
+.planner-lead { color: var(--muted); margin: 0 0 22px; max-width: 680px; }
+.planner-note, .planner-empty { color: var(--muted); font-size: 12px; }
+.planner-note { margin-top: 24px; max-width: 760px; }
+.planner-note strong { color: var(--ink); }
+
+.planner-form { max-width: 640px; }
+.planner-form > div { margin-bottom: 18px; }
+.planner-form label { display: block; font-weight: 600; margin-bottom: 5px; }
+.planner-form select, .planner-form textarea { display: block; width: 100%; padding: 9px; border: 1px solid var(--line); border-radius: 7px; background: white; color: var(--ink); }
+.planner-form textarea { resize: vertical; min-height: 120px; }
+.planner-form select:focus, .planner-form textarea:focus { border-color: #708b65; outline: none; box-shadow: 0 0 0 3px #b5c5a933; }
+.planner-form .helptext { display: block; color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+.planner-page .errorlist { list-style: none; padding: 0; margin: 0 0 6px; color: var(--error); font-size: 12px; font-weight: 500; }
+.planner-page .errorlist.nonfield { border: 1px solid #e7c5b7; background: #fff4ed; border-radius: 9px; padding: 10px 12px; margin-bottom: 16px; }
+
+.progress-summary { display: grid; gap: 8px; margin-bottom: 16px; padding: 24px 28px; }
+.progress-summary p { margin: 0; color: var(--muted); }
+.progress-count { font: 26px/1.3 var(--font-display); font-weight: 400; margin: 0; }
+.progress-count strong { color: var(--forest); font-weight: 400; }
+.progress-credits { font-variant-numeric: tabular-nums; }
+.progress-bar { width: 100%; max-width: 480px; height: 10px; accent-color: var(--forest); }
+.planner-unused { font-size: 12px; color: var(--muted); margin: 0 0 16px; }
+
+.progress-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; align-items: start; }
+.column-title { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; margin: 8px 0 12px; }
+.column-title span { font-size: 11px; font-weight: 500; color: var(--muted); border: 1px solid var(--line); border-radius: 12px; padding: 1px 8px; }
+.requirement-card { background: white; border: 1px solid var(--line); border-left: 3px solid #c9a36a; border-radius: 10px; padding: 14px 16px; margin-bottom: 10px; }
+.requirement-card.is-satisfied { border-left-color: var(--forest); }
+.requirement-card h3 { font-size: 14px; line-height: 1.4; margin: 0 0 4px; }
+.requirement-card p { margin: 4px 0; font-size: 12px; line-height: 1.6; }
+.requirement-rule, .requirement-source { color: var(--muted); }
+.requirement-label { font-weight: 600; }
+.requirement-source a { text-underline-offset: 3px; }
+
+@media (max-width: 900px) { .progress-columns { grid-template-columns: 1fr; } }
+@media (max-width: 760px) {
+  .planner-page { padding: 20px 15px 30px; }
+  .planner-page h1 { font-size: 28px; }
+  .planner-form, .progress-summary { padding: 20px; }
+  .planner-form textarea { font-size: 16px; }
+}

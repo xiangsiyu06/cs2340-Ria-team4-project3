@@ -1,0 +1,11 @@
+<article class="requirement-card{% if requirement.satisfied %} is-satisfied{% endif %}">
+  <h3>{{ requirement.name }}</h3>
+  <p class="requirement-rule">{{ requirement.summary }}{% if requirement.credits_required is not None %} · {{ requirement.credits_required }} credit hours{% endif %}</p>
+  {% if requirement.used_courses %}<p><span class="requirement-label">Counted:</span> {{ requirement.used_courses|join:", " }}</p>{% endif %}
+  {% if not requirement.satisfied %}
+  <p class="requirement-missing"><span class="requirement-label">Still needed:</span>
+    {% if requirement.rule == 'all' %}{{ requirement.options|join:", " }}{% else %}{{ requirement.remaining }} more {{ requirement.unit }}{{ requirement.remaining|pluralize }}{% if requirement.options %} from {{ requirement.options|join:", " }}{% endif %}{% endif %}
+  </p>
+  {% endif %}
+  <p class="requirement-source">Source: <a href="{{ requirement.source.url }}" target="_blank" rel="noopener">{{ requirement.source.name }}{% if requirement.source.page %}, page {{ requirement.source.page }}{% endif %}</a></p>
+</article>

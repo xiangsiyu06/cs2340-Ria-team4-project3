@@ -193,6 +193,7 @@ details[open] .source-chevron { transform: rotate(45deg); }
   .workspace-label, .sidebar-note, .sidebar-footer, .chat-nav, .topbar { display: none; }
   .nav-item { margin: 0; padding: 7px; width: auto; font-size: 11px; gap: 5px; } .nav-item svg { width: 16px; height: 16px; }
   .sidebar nav { display: flex; align-items: center; } .sources-nav .nav-label { display: none; }
+  .planner-nav .nav-label { display: none; }
   .knowledge-page { padding: 20px 15px; }
   .chat-page { height: calc(100dvh - 67px); padding: 14px 20px 12px; }
   .section-label { font-size: 8px; letter-spacing: 1.1px; } .button-subtle { font-size: 11px; min-height: 34px; padding: 7px 10px; }
@@ -207,6 +208,7 @@ details[open] .source-chevron { transform: rotate(45deg); }
   .message-body, .answer-sources { margin-left: 0; } .conversation { margin-top: 25px; }
   .preview-banner { font-size: 10px; } .sample-document { margin: 25px 18px; padding: 23px; }
 }
+@media (max-width: 334px) { .planner-nav { display: none; } } /* C1 link: no room in the phone header below 335px */
 @media (max-width: 380px) { .sidebar { padding: 13px 15px; } .brand { font-size: 18px; gap: 8px; } .chat-page { padding-left: 15px; padding-right: 15px; } .nav-item { font-size: 10px; } .welcome h1 { font-size: 43px; } .section-label { max-width: 110px; } .desktop-break { display: none; } }
 @media (min-width: 761px) and (max-height: 800px) {
   .welcome { padding: 12px 0 8px; }

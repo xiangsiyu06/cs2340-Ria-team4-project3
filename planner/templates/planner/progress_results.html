@@ -1,0 +1,50 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block title %}Your degree progress · DegreeGuide{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'planner/planner.css' %}">{% endblock %}
+{% block breadcrumb %}Degree progress{% endblock %}
+{% block chat_current %}{% endblock %}
+{% block content %}
+{% with program=progress.program %}
+<div class="planner-page">
+  <span class="eyebrow">DEGREE PROGRESS</span>
+  <h1>{{ program.major }}</h1>
+  <p class="planner-lead">Catalog {{ program.catalog_year }}{% if program.thread %} · {{ program.thread }}{% endif %} · {{ progress.completed_courses|length }} course{{ progress.completed_courses|length|pluralize }} entered</p>
+
+  <section class="card progress-summary" aria-labelledby="progress-count">
+    <h2 id="progress-count" class="progress-count"><strong>{{ progress.satisfied_count }}</strong> of {{ progress.total_count }} requirements satisfied</h2>
+    {% if progress.credits_required is not None %}
+    <p class="progress-credits">{{ progress.credits_earned }} of {{ progress.credits_required }} credit hours in these requirements</p>
+    <progress class="progress-bar" max="{{ progress.credits_required }}" value="{{ progress.credits_earned }}">{{ progress.credits_earned }} of {{ progress.credits_required }}</progress>
+    {% endif %}
+    <p>{% if progress.is_complete %}You've completed every requirement listed here.{% else %}{{ progress.still_needed|length }} requirement{{ progress.still_needed|length|pluralize }} still needed.{% endif %}</p>
+    <div><a class="button" href="{{ edit_url }}">Edit courses</a></div>
+  </section>
+
+  {% if progress.unused_courses %}
+  <p class="planner-unused">Not counted toward any requirement below: {{ progress.unused_courses|join:", " }}. They may still count as electives.</p>
+  {% endif %}
+
+  <div class="progress-columns">
+    <section aria-labelledby="satisfied-title">
+      <h2 id="satisfied-title" class="column-title">Satisfied <span>{{ progress.satisfied|length }}</span></h2>
+      {% for requirement in progress.satisfied %}
+        {% include 'planner/requirement.html' %}
+      {% empty %}
+        <p class="planner-empty">None yet.</p>
+      {% endfor %}
+    </section>
+    <section aria-labelledby="needed-title">
+      <h2 id="needed-title" class="column-title">Still needed <span>{{ progress.still_needed|length }}</span></h2>
+      {% for requirement in progress.still_needed %}
+        {% include 'planner/requirement.html' %}
+      {% empty %}
+        <p class="planner-empty">Nothing left in these requirements.</p>
+      {% endfor %}
+    </section>
+  </div>
+
+  <p class="planner-note">Only requirements that list specific courses are checked. Free electives and requirements such as "any humanities" are not, and a course on an elective list counts toward only one requirement. This is a planning aid based on the official catalog. <strong>Confirm with your academic advisor.</strong></p>
+</div>
+{% endwith %}
+{% endblock %}
